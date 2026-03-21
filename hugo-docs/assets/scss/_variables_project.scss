@@ -1,0 +1,18 @@
+// Match the older MkDocs Material indigo feel.
+$primary: #3f51b5;
+$secondary: #303f9f;
+$success: #4caf50;
+$info: #2196f3;
+$warning: #ff9800;
+$danger: #f44336;
+
+$link-color: #3f51b5;
+$link-hover-color: darken($link-color, 15%);
+
+$font-family-sans-serif: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+$font-family-monospace: "Roboto Mono", "Fira Code", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+$td-sidebar-bg-color: #fafafa;
+$td-sidebar-text-color: #333;
+
+$navbar-dark-color: rgba(255, 255, 255, 0.9);

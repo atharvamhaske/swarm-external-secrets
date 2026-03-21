@@ -1,0 +1,58 @@
+<script>
+(() => {
+  const ready = () => {
+    const tocContainer = document.querySelector('.td-toc');
+    const toc = document.querySelector('#TableOfContents');
+    if (!tocContainer || !toc) return;
+
+    const title = document.querySelector('.td-toc-title');
+    if (title) title.textContent = 'Table of contents';
+
+    const tocLinks = Array.from(toc.querySelectorAll('a[href^="#"]'));
+    const headings = tocLinks
+      .map((link) => {
+        const id = decodeURIComponent(link.getAttribute('href').slice(1));
+        const target = document.getElementById(id);
+        return target ? { link, target } : null;
+      })
+      .filter(Boolean);
+
+    if (!headings.length) return;
+
+    const setActive = (activeLink) => {
+      tocLinks.forEach((link) => link.classList.toggle('active', link === activeLink));
+      if (activeLink) {
+        activeLink.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        tocContainer.scrollLeft = 0;
+      }
+    };
+
+    tocLinks.forEach((link) => {
+      link.addEventListener('click', () => setActive(link));
+    });
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.target.offsetTop - b.target.offsetTop);
+        if (visible.length === 0) return;
+        const matched = headings.find((item) => item.target === visible[0].target);
+        if (matched) setActive(matched.link);
+      },
+      {
+        rootMargin: '-80px 0px -65% 0px',
+        threshold: [0, 1],
+      }
+    );
+
+    headings.forEach(({ target }) => observer.observe(target));
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ready);
+  } else {
+    ready();
+  }
+})();
+</script>
