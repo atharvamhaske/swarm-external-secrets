@@ -4,6 +4,8 @@ html {
 
 body {
   font-family: $font-family-sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .td-navbar {
@@ -20,12 +22,38 @@ body {
 .td-sidebar-nav__section-title > .td-sidebar-link,
 .td-sidebar-link__section,
 .td-sidebar-link__page {
-  font-size: 0.96rem;
-  line-height: 1.5;
+  font-size: 0.88rem;
+  line-height: 1.4;
 }
 
 .td-content {
   max-width: 900px;
+}
+
+.td-content > h1,
+.td-content .lead {
+  font-size: 2rem;
+}
+
+.td-content h2 {
+  font-size: 1.45rem;
+}
+
+.td-content h3 {
+  font-size: 1.16rem;
+}
+
+.td-content h4 {
+  font-size: 1rem;
+}
+
+.td-content p,
+.td-content li,
+.td-content dt,
+.td-content dd,
+.td-content td,
+.td-content th {
+  font-size: 0.95rem;
 }
 
 .td-content h1,
@@ -46,6 +74,7 @@ body {
 
 .td-content code {
   font-family: $font-family-monospace;
+  font-size: 0.88rem;
 }
 
 .td-content :not(pre) > code {
@@ -99,7 +128,7 @@ body {
   border-radius: 4px;
   color: #4b5563;
   display: block;
-  font-size: 0.83rem;
+  font-size: 0.78rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
   padding: 0.2rem 0.3rem 0.2rem 0.6rem;
@@ -121,7 +150,7 @@ body {
 }
 
 .td-toc-title {
-  font-size: 0.95rem;
+  font-size: 0.84rem;
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
