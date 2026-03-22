@@ -18,6 +18,8 @@ func CreateProvider(providerType string) (SecretsProvider, error) {
 		return &AzureProvider{}, nil
 	case "openbao":
 		return &OpenBaoProvider{}, nil
+	case "doppler":
+		return &DopplerProvider{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
@@ -31,6 +33,7 @@ func GetSupportedProviders() []string {
 		"gcp",
 		"azure",
 		"openbao",
+		"doppler",
 	}
 }
 
@@ -68,6 +71,12 @@ func GetProviderInfo(providerType string) (map[string]string, error) {
 		info["description"] = "OpenBao secrets engine (Vault-compatible)"
 		info["auth_methods"] = "token, approle"
 		info["env_vars"] = "OPENBAO_ADDR, OPENBAO_TOKEN, OPENBAO_MOUNT_PATH, OPENBAO_AUTH_METHOD, OPENBAO_ROLE_ID, OPENBAO_SECRET_ID"
+
+	case "doppler":
+		info["name"] = "Doppler"
+		info["description"] = "Doppler secrets management (doppler.com)"
+		info["auth_methods"] = "service token (DOPPLER_KEY or DOPPLER_TOKEN)"
+		info["env_vars"] = "DOPPLER_KEY or DOPPLER_TOKEN, DOPPLER_PROJECT, DOPPLER_CONFIG"
 
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
