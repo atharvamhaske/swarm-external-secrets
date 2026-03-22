@@ -11,6 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.18.45
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.43
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.21.4
+	github.com/dilutedev/doppler v0.0.0-20250528024252-2f0eb98a6427
 	github.com/docker/docker v28.3.1+incompatible
 	github.com/docker/go-plugins-helpers v0.0.0-20240701071450-45e2431495c8
 	github.com/hashicorp/vault/api v1.20.0
