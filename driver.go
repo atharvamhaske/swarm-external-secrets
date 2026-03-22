@@ -202,6 +202,8 @@ func (d *SecretsDriver) trackSecret(req secrets.Request, value []byte) {
 		secretField = req.SecretLabels["azure_field"]
 	case "openbao":
 		secretField = req.SecretLabels["openbao_field"]
+	case "doppler":
+		secretField = req.SecretLabels["doppler_secret"]
 	}
 
 	if secretField == "" {
@@ -221,6 +223,8 @@ func (d *SecretsDriver) trackSecret(req secrets.Request, value []byte) {
 		secretPath = d.buildAzureSecretName(req)
 	case "openbao":
 		secretPath = d.buildOpenBaoSecretPath(req)
+	case "doppler":
+		secretPath = d.buildDopplerSecretPath(req)
 	default:
 		secretPath = req.SecretName
 	}
@@ -358,6 +362,14 @@ func (d *SecretsDriver) rotateSecret(secretInfo *providers.SecretInfo) error {
 	case "openbao":
 		req.SecretLabels["openbao_field"] = secretInfo.SecretField
 		req.SecretLabels["openbao_path"] = strings.TrimPrefix(secretInfo.SecretPath, "secret/data/")
+	case "doppler":
+		project, cfg, secret, err := providers.ParseDopplerSecretPath(secretInfo.SecretPath)
+		if err != nil {
+			return fmt.Errorf("doppler rotation: %w", err)
+		}
+		req.SecretLabels["doppler_project"] = project
+		req.SecretLabels["doppler_config"] = cfg
+		req.SecretLabels["doppler_secret"] = secret
 	}
 
 	// Get the new secret value from the provider
@@ -594,6 +606,24 @@ func (d *SecretsDriver) buildOpenBaoSecretPath(req secrets.Request) string {
 		return fmt.Sprintf("secret/data/%s/%s", req.ServiceName, req.SecretName)
 	}
 	return fmt.Sprintf("secret/data/%s", req.SecretName)
+}
+
+// buildDopplerSecretPath returns a stable tracker key: project|config|secretName.
+// Defaults come from the environment when labels are omitted (same as plugin env at runtime).
+func (d *SecretsDriver) buildDopplerSecretPath(req secrets.Request) string {
+	project := req.SecretLabels["doppler_project"]
+	if project == "" {
+		project = os.Getenv("DOPPLER_PROJECT")
+	}
+	cfg := req.SecretLabels["doppler_config"]
+	if cfg == "" {
+		cfg = os.Getenv("DOPPLER_CONFIG")
+	}
+	name := req.SecretLabels["doppler_secret"]
+	if name == "" {
+		name = req.SecretName
+	}
+	return project + "|" + cfg + "|" + name
 }
 
 func (d *SecretsDriver) buildAWSSecretName(req secrets.Request) string {
