@@ -10,7 +10,7 @@ weight: 1
 
 ---
 
-A Docker Swarm secrets plugin that integrates with multiple secret management providers including HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, and OpenBao.
+A Docker Swarm secrets plugin that integrates with multiple secret management providers including HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, OpenBao, and Doppler.
 
 ## Updates
 
@@ -33,10 +33,11 @@ For more information, check out the [GSoC Contribution Guidelines](contributing/
 | Azure Key Vault | Stable | Service Principal, Managed Identity | Yes |
 | OpenBao | Stable | Token, AppRole | Yes |
 | GCP Secret Manager | Beta | Service Account, ADC | Yes |
+| Doppler | Beta | Service token (`DOPPLER_KEY` / `DOPPLER_TOKEN`) | Yes |
 
 ## Features
 
-- **Multi-Provider Support** — HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, OpenBao
+- **Multi-Provider Support** — HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, OpenBao, Doppler
 - **Multiple Auth Methods** — Support for various authentication methods per provider
 - **Automatic Secret Rotation** — Monitor providers for changes and automatically update Docker secrets and services
 - **Real-time Monitoring** — Web dashboard with system metrics, health status, and performance tracking
