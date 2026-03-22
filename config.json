@@ -201,6 +201,26 @@
       "name": "OPENBAO_SKIP_VERIFY",
       "description": "Skip TLS certificate verification for OpenBao (true/false)",
       "settable": ["value"]
+    },
+    {
+      "name": "DOPPLER_KEY",
+      "description": "Doppler API token (service token recommended; see docs.doppler.com)",
+      "settable": ["value"]
+    },
+    {
+      "name": "DOPPLER_TOKEN",
+      "description": "Alias for DOPPLER_KEY if your environment uses TOKEN naming",
+      "settable": ["value"]
+    },
+    {
+      "name": "DOPPLER_PROJECT",
+      "description": "Default Doppler project name (can be overridden per secret with label doppler_project)",
+      "settable": ["value"]
+    },
+    {
+      "name": "DOPPLER_CONFIG",
+      "description": "Default Doppler config / environment name (can be overridden with label doppler_config)",
+      "settable": ["value"]
     }
   ]
 }
