@@ -48,6 +48,26 @@
       "settable": ["value"]
     },
     {
+      "name": "VAULT_JWT",
+      "description": "Raw JWT for Vault JWT auth",
+      "settable": ["value"]
+    },
+    {
+      "name": "VAULT_JWT_FILE",
+      "description": "Path to a JWT file for Vault JWT auth",
+      "settable": ["value"]
+    },
+    {
+      "name": "VAULT_JWT_ROLE",
+      "description": "Vault JWT auth role name",
+      "settable": ["value"]
+    },
+    {
+      "name": "VAULT_JWT_AUTH_PATH",
+      "description": "Vault JWT auth mount path",
+      "settable": ["value"]
+    },
+    {
       "name": "VAULT_MOUNT_PATH",
       "description": "Vault mount path",
       "settable": ["value"]

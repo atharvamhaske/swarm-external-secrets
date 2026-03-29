@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/docker/go-plugins-helpers/secrets"
 	"github.com/hashicorp/vault/api"
@@ -19,31 +20,39 @@ type VaultProvider struct {
 
 // SecretsConfig holds the configuration for the Vault client
 type SecretsConfig struct {
-	Address    string
-	Token      string
-	MountPath  string
-	RoleID     string
-	SecretID   string
-	AuthMethod string
-	CACert     string
-	ClientCert string
-	ClientKey  string
-	SkipVerify bool
+	Address     string
+	Token       string
+	MountPath   string
+	RoleID      string
+	SecretID    string
+	JWT         string
+	JWTFile     string
+	JWTRole     string
+	JWTAuthPath string
+	AuthMethod  string
+	CACert      string
+	ClientCert  string
+	ClientKey   string
+	SkipVerify  bool
 }
 
 // Initialize sets up the Vault provider with the given configuration
 func (v *VaultProvider) Initialize(config map[string]string) error {
 	v.config = &SecretsConfig{
-		Address:    getConfigOrDefault(config, "VAULT_ADDR", ""),
-		Token:      getConfigOrDefault(config, "VAULT_TOKEN", ""),
-		MountPath:  getConfigOrDefault(config, "VAULT_MOUNT_PATH", "secret"),
-		RoleID:     config["VAULT_ROLE_ID"],
-		SecretID:   config["VAULT_SECRET_ID"],
-		AuthMethod: getConfigOrDefault(config, "VAULT_AUTH_METHOD", "token"),
-		CACert:     config["VAULT_CACERT"],
-		ClientCert: config["VAULT_CLIENT_CERT"],
-		ClientKey:  config["VAULT_CLIENT_KEY"],
-		SkipVerify: getConfigOrDefault(config, "VAULT_SKIP_VERIFY", "false") == "true",
+		Address:     getConfigOrDefault(config, "VAULT_ADDR", ""),
+		Token:       getConfigOrDefault(config, "VAULT_TOKEN", ""),
+		MountPath:   getConfigOrDefault(config, "VAULT_MOUNT_PATH", "secret"),
+		RoleID:      config["VAULT_ROLE_ID"],
+		SecretID:    config["VAULT_SECRET_ID"],
+		JWT:         getConfigOrDefault(config, "VAULT_JWT", ""),
+		JWTFile:     getConfigOrDefault(config, "VAULT_JWT_FILE", ""),
+		JWTRole:     getConfigOrDefault(config, "VAULT_JWT_ROLE", ""),
+		JWTAuthPath: getConfigOrDefault(config, "VAULT_JWT_AUTH_PATH", "jwt"),
+		AuthMethod:  getConfigOrDefault(config, "VAULT_AUTH_METHOD", "token"),
+		CACert:      config["VAULT_CACERT"],
+		ClientCert:  config["VAULT_CLIENT_CERT"],
+		ClientKey:   config["VAULT_CLIENT_KEY"],
+		SkipVerify:  getConfigOrDefault(config, "VAULT_SKIP_VERIFY", "false") == "true",
 	}
 
 	// Configure Vault client
@@ -183,6 +192,29 @@ func (v *VaultProvider) authenticate() error {
 
 		v.client.SetToken(resp.Auth.ClientToken)
 
+	case "jwt":
+		jwt, err := v.vaultJWT()
+		if err != nil {
+			return err
+		}
+		if v.config.JWTRole == "" {
+			return fmt.Errorf("VAULT_JWT_ROLE is required for jwt authentication")
+		}
+
+		resp, err := v.client.Logical().Write(v.vaultJWTLoginPath(), map[string]interface{}{
+			"role": v.config.JWTRole,
+			"jwt":  jwt,
+		})
+		if err != nil {
+			return fmt.Errorf("jwt authentication failed: %v", err)
+		}
+
+		if resp.Auth == nil {
+			return fmt.Errorf("no auth info returned from jwt login")
+		}
+
+		v.client.SetToken(resp.Auth.ClientToken)
+
 	default:
 		return fmt.Errorf("unsupported authentication method: %s", v.config.AuthMethod)
 	}
@@ -252,6 +284,35 @@ func (v *VaultProvider) extractSecretValue(secret *api.Secret, req secrets.Reque
 	}
 
 	return nil, fmt.Errorf("no suitable secret value found")
+}
+
+func (v *VaultProvider) vaultJWT() (string, error) {
+	if v.config.JWT != "" {
+		return strings.TrimSpace(v.config.JWT), nil
+	}
+	if v.config.JWTFile == "" {
+		return "", fmt.Errorf("VAULT_JWT or VAULT_JWT_FILE is required for jwt authentication")
+	}
+
+	jwtBytes, err := os.ReadFile(v.config.JWTFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read VAULT_JWT_FILE: %v", err)
+	}
+
+	jwt := strings.TrimSpace(string(jwtBytes))
+	if jwt == "" {
+		return "", fmt.Errorf("VAULT_JWT_FILE is empty")
+	}
+
+	return jwt, nil
+}
+
+func (v *VaultProvider) vaultJWTLoginPath() string {
+	authPath := strings.Trim(v.config.JWTAuthPath, "/")
+	if authPath == "" {
+		authPath = "jwt"
+	}
+	return fmt.Sprintf("auth/%s/login", authPath)
 }
 
 // getConfigOrDefault returns config value or environment variable or default

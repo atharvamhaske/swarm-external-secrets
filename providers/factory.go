@@ -42,8 +42,8 @@ func GetProviderInfo(providerType string) (map[string]string, error) {
 	case "vault", "hashicorp-vault":
 		info["name"] = "HashiCorp Vault"
 		info["description"] = "HashiCorp Vault secrets engine"
-		info["auth_methods"] = "token, approle"
-		info["env_vars"] = "VAULT_ADDR, VAULT_TOKEN, VAULT_MOUNT_PATH, VAULT_AUTH_METHOD, VAULT_ROLE_ID, VAULT_SECRET_ID"
+		info["auth_methods"] = "token, approle, jwt"
+		info["env_vars"] = "VAULT_ADDR, VAULT_TOKEN, VAULT_MOUNT_PATH, VAULT_AUTH_METHOD, VAULT_ROLE_ID, VAULT_SECRET_ID, VAULT_JWT, VAULT_JWT_FILE, VAULT_JWT_ROLE, VAULT_JWT_AUTH_PATH"
 
 	case "aws", "aws-secrets-manager":
 		info["name"] = "AWS Secrets Manager"
