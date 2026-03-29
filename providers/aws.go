@@ -9,9 +9,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/docker/go-plugins-helpers/secrets"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/sugar-org/vault-swarm-plugin/internal/spiffejwt"
 )
 
 // AWSProvider implements the SecretsProvider interface for AWS Secrets Manager
@@ -22,21 +26,36 @@ type AWSProvider struct {
 
 // AWSConfig holds the configuration for the AWS Secrets Manager client
 type AWSConfig struct {
-	Region      string
-	AccessKey   string
-	SecretKey   string
-	Profile     string
-	EndpointURL string
+	Region               string
+	AccessKey            string
+	SecretKey            string
+	Profile              string
+	EndpointURL          string
+	RoleARN              string
+	WebIdentityTokenFile string
+	RoleSessionName      string
+	SpiffeJWTAudience    string
+	SpiffeEndpointSocket string
 }
 
 // Initialize sets up the AWS provider with the given configuration
 func (a *AWSProvider) Initialize(config map[string]string) error {
 	a.config = &AWSConfig{
-		Region:      getConfigOrDefault(config, "AWS_REGION", "us-east-1"),
-		AccessKey:   config["AWS_ACCESS_KEY_ID"],
-		SecretKey:   config["AWS_SECRET_ACCESS_KEY"],
-		Profile:     config["AWS_PROFILE"],
-		EndpointURL: config["AWS_ENDPOINT_URL"],
+		Region:               getConfigOrDefault(config, "AWS_REGION", "us-east-1"),
+		AccessKey:            config["AWS_ACCESS_KEY_ID"],
+		SecretKey:            config["AWS_SECRET_ACCESS_KEY"],
+		Profile:              config["AWS_PROFILE"],
+		EndpointURL:          config["AWS_ENDPOINT_URL"],
+		RoleARN:              config["AWS_ROLE_ARN"],
+		WebIdentityTokenFile: config["AWS_WEB_IDENTITY_TOKEN_FILE"],
+		RoleSessionName:      config["AWS_ROLE_SESSION_NAME"],
+		SpiffeJWTAudience:    config["AWS_SPIFFE_JWT_AUDIENCE"],
+		SpiffeEndpointSocket: config["SPIFFE_ENDPOINT_SOCKET"],
+	}
+
+	authMode, err := a.resolveAuthMode()
+	if err != nil {
+		return err
 	}
 
 	// Load AWS configuration
@@ -52,7 +71,11 @@ func (a *AWSProvider) Initialize(config map[string]string) error {
 		}
 	})
 
-	log.Printf("Successfully initialized AWS Secrets Manager provider for region: %s", a.config.Region)
+	log.Printf(
+		"Successfully initialized AWS Secrets Manager provider for region: %s using %s auth",
+		a.config.Region,
+		authMode,
+	)
 	return nil
 }
 
@@ -158,7 +181,88 @@ func (a *AWSProvider) loadAWSConfig() (aws.Config, error) {
 		)
 	}
 
+	if a.config.RoleARN != "" && a.config.SpiffeJWTAudience != "" {
+		stsCfg := cfg
+		stsCfg.Credentials = aws.AnonymousCredentials{}
+
+		provider := stscreds.NewWebIdentityRoleProvider(
+			sts.NewFromConfig(stsCfg),
+			a.config.RoleARN,
+			spiffeIdentityTokenRetriever{
+				cfg: spiffejwt.Config{
+					Audience:       a.config.SpiffeJWTAudience,
+					EndpointSocket: a.config.SpiffeEndpointSocket,
+				},
+			},
+			func(options *stscreds.WebIdentityRoleOptions) {
+				options.RoleSessionName = a.config.RoleSessionName
+			},
+		)
+		cfg.Credentials = aws.NewCredentialsCache(provider)
+	}
+
 	return cfg, nil
+}
+
+func (a *AWSProvider) resolveAuthMode() (string, error) {
+	hasStaticKeyPair := a.config.AccessKey != "" || a.config.SecretKey != ""
+	hasCompleteStaticKeyPair := a.config.AccessKey != "" && a.config.SecretKey != ""
+	hasWebIdentityFile := a.config.WebIdentityTokenFile != ""
+	hasDirectSpiffeWebIdentity := a.config.SpiffeJWTAudience != ""
+
+	if hasStaticKeyPair && !hasCompleteStaticKeyPair {
+		return "", fmt.Errorf("AWS static auth requires both AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
+	}
+
+	if a.config.RoleARN != "" && !hasWebIdentityFile && !hasDirectSpiffeWebIdentity {
+		return "", fmt.Errorf("AWS_ROLE_ARN requires either AWS_WEB_IDENTITY_TOKEN_FILE or AWS_SPIFFE_JWT_AUDIENCE")
+	}
+
+	if hasWebIdentityFile && a.config.RoleARN == "" {
+		return "", fmt.Errorf("AWS web identity auth requires both AWS_ROLE_ARN and AWS_WEB_IDENTITY_TOKEN_FILE")
+	}
+
+	if hasDirectSpiffeWebIdentity && a.config.RoleARN == "" {
+		return "", fmt.Errorf("AWS SPIFFE web identity auth requires both AWS_ROLE_ARN and AWS_SPIFFE_JWT_AUDIENCE")
+	}
+
+	if hasCompleteStaticKeyPair && (hasWebIdentityFile || hasDirectSpiffeWebIdentity) {
+		return "", fmt.Errorf("AWS static credentials and web identity auth cannot be configured together")
+	}
+
+	if hasWebIdentityFile && hasDirectSpiffeWebIdentity {
+		return "", fmt.Errorf("AWS token-file web identity and direct SPIFFE web identity cannot be configured together")
+	}
+
+	if hasDirectSpiffeWebIdentity {
+		return "spiffe-workload-api-web-identity", nil
+	}
+
+	if hasWebIdentityFile {
+		return "web-identity-token-file", nil
+	}
+
+	if hasCompleteStaticKeyPair {
+		return "static-credentials", nil
+	}
+
+	if a.config.Profile != "" {
+		return "shared-profile", nil
+	}
+
+	return "default-credential-chain", nil
+}
+
+type spiffeIdentityTokenRetriever struct {
+	cfg spiffejwt.Config
+}
+
+func (r spiffeIdentityTokenRetriever) GetIdentityToken() ([]byte, error) {
+	token, _, err := r.cfg.FetchToken(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return []byte(token), nil
 }
 
 // buildSecretName constructs the AWS secret name based on request labels and service information
