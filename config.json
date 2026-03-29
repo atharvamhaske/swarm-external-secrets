@@ -19,6 +19,18 @@
       "destination": "/var/run/docker.sock",
       "type": "bind",
       "options": ["bind", "rbind"]
+    },
+    {
+      "source": "/run/swarm-external-secrets",
+      "destination": "/run/swarm-external-secrets",
+      "type": "bind",
+      "options": ["bind", "rbind"]
+    },
+    {
+      "source": "/run/spire/sockets",
+      "destination": "/run/spire/sockets",
+      "type": "bind",
+      "options": ["bind", "rbind"]
     }
   ],
   "env": [
@@ -130,6 +142,31 @@
     {
       "name": "AWS_ENDPOINT_URL",
       "description": "AWS endpoint URL (e.g. for LocalStack)",
+      "settable": ["value"]
+    },
+    {
+      "name": "AWS_ROLE_ARN",
+      "description": "AWS IAM role ARN for web identity federation",
+      "settable": ["value"]
+    },
+    {
+      "name": "AWS_WEB_IDENTITY_TOKEN_FILE",
+      "description": "Path to the mounted web identity token file",
+      "settable": ["value"]
+    },
+    {
+      "name": "AWS_ROLE_SESSION_NAME",
+      "description": "Optional AWS role session name for web identity auth",
+      "settable": ["value"]
+    },
+    {
+      "name": "AWS_SPIFFE_JWT_AUDIENCE",
+      "description": "SPIFFE JWT audience for direct Workload API based AWS web identity auth",
+      "settable": ["value"]
+    },
+    {
+      "name": "SPIFFE_ENDPOINT_SOCKET",
+      "description": "SPIFFE Workload API socket URI, for example unix:///run/spire/sockets/agent.sock",
       "settable": ["value"]
     },
     {
