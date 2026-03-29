@@ -131,7 +131,7 @@ docker plugin set swarm-external-secrets:latest \
 
 | Provider | Status | Authentication | Rotation |
 |----------|--------|---------------|----------|
-| HashiCorp Vault | ✅ Stable | Token, AppRole | ✅ |
+| HashiCorp Vault | ✅ Stable | Token, AppRole, JWT | ✅ |
 | AWS Secrets Manager | ✅ Stable | IAM, Access Keys | ✅ |
 | Azure Key Vault | ✅ Stable | Service Principal, Access Token | ✅ |
 | OpenBao | ✅ Stable | Token, AppRole | ✅ |
@@ -145,6 +145,16 @@ docker plugin set swarm-external-secrets:latest \
     SECRETS_PROVIDER="vault" \
     VAULT_ADDR="https://vault.example.com:8200" \
     VAULT_TOKEN="hvs.example-token"
+```
+
+### HashiCorp Vault JWT
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="vault" \
+    VAULT_ADDR="https://vault.example.com:8200" \
+    VAULT_AUTH_METHOD="jwt" \
+    VAULT_JWT_FILE="/run/swarm-external-secrets/vault-jwt" \
+    VAULT_JWT_ROLE="swarm-plugin"
 ```
 
 ### AWS Secrets Manager

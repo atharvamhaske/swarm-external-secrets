@@ -15,9 +15,13 @@ The Vault Swarm Plugin supports multiple secrets providers, allowing you to use 
 | `VAULT_ADDR` | Vault server address | `http://localhost:8200` |
 | `VAULT_TOKEN` | Vault token for authentication | — |
 | `VAULT_MOUNT_PATH` | Mount path for KV engine | `secret` |
-| `VAULT_AUTH_METHOD` | Authentication method (`token`, `approle`) | `token` |
+| `VAULT_AUTH_METHOD` | Authentication method (`token`, `approle`, `jwt`) | `token` |
 | `VAULT_ROLE_ID` | Role ID for AppRole authentication | — |
 | `VAULT_SECRET_ID` | Secret ID for AppRole authentication | — |
+| `VAULT_JWT` | Raw JWT for Vault JWT auth | — |
+| `VAULT_JWT_FILE` | Path to a JWT file for Vault JWT auth | — |
+| `VAULT_JWT_ROLE` | Vault JWT role name | — |
+| `VAULT_JWT_AUTH_PATH` | Vault JWT auth mount path | `jwt` |
 | `VAULT_SKIP_VERIFY` | Skip TLS verification (not recommended for production) | `false` |
 
 **Example:**
@@ -26,6 +30,16 @@ docker plugin set swarm-external-secrets:latest \
     SECRETS_PROVIDER="vault" \
     VAULT_ADDR="https://vault.example.com:8200" \
     VAULT_TOKEN="hvs.example-token"
+```
+
+**JWT Example:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="vault" \
+    VAULT_ADDR="https://vault.example.com:8200" \
+    VAULT_AUTH_METHOD="jwt" \
+    VAULT_JWT_FILE="/run/swarm-external-secrets/vault-jwt" \
+    VAULT_JWT_ROLE="swarm-plugin"
 ```
 
 ---
