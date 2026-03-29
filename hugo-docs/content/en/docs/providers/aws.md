@@ -16,8 +16,15 @@ AWS Secrets Manager supports direct string secrets, JSON secrets with field extr
 | `AWS_SECRET_ACCESS_KEY` | optional | none | Static credentials |
 | `AWS_PROFILE` | optional | none | Shared config profile |
 | `AWS_ENDPOINT_URL` | optional | none | Useful for LocalStack or custom endpoints |
+| `AWS_ROLE_ARN` | optional | none | IAM role for web identity federation |
+| `AWS_WEB_IDENTITY_TOKEN_FILE` | optional | none | Mounted token file used for `AssumeRoleWithWebIdentity` |
+| `AWS_ROLE_SESSION_NAME` | optional | none | Optional session name for web identity auth |
+| `AWS_SPIFFE_JWT_AUDIENCE` | optional | none | Fetches JWT-SVID directly from the SPIRE Workload API |
+| `SPIFFE_ENDPOINT_SOCKET` | optional | none | SPIRE Workload API socket URI, for example `unix:///run/spire/sockets/agent.sock` |
 
 The provider loads normal AWS SDK config first, then overrides credentials if explicit access keys are set.
+If `AWS_ROLE_ARN` and `AWS_WEB_IDENTITY_TOKEN_FILE` are both set, the AWS SDK uses web identity federation.
+If `AWS_ROLE_ARN` and `AWS_SPIFFE_JWT_AUDIENCE` are both set, the plugin fetches a fresh JWT-SVID from the SPIRE Workload API and uses `AssumeRoleWithWebIdentity` directly.
 
 ## Basic Configuration
 
@@ -39,6 +46,34 @@ docker plugin set swarm-external-secrets:latest \
     AWS_SECRET_ACCESS_KEY="test" \
     AWS_ENDPOINT_URL="http://localhost:4566"
 ```
+
+## Web Identity Example
+
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="aws" \
+    AWS_REGION="us-west-2" \
+    AWS_ROLE_ARN="arn:aws:iam::123456789012:role/swarm-secrets" \
+    AWS_WEB_IDENTITY_TOKEN_FILE="/run/swarm-external-secrets/aws-web-identity-token" \
+    AWS_ROLE_SESSION_NAME="swarm-external-secrets"
+```
+
+## Direct SPIFFE Workload API Example
+
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="aws" \
+    AWS_REGION="us-west-2" \
+    AWS_ROLE_ARN="arn:aws:iam::123456789012:role/swarm-secrets" \
+    AWS_SPIFFE_JWT_AUDIENCE="awssm" \
+    SPIFFE_ENDPOINT_SOCKET="unix:///run/spire/sockets/agent.sock"
+```
+
+For multi-role isolation in Swarm, run one plugin instance per AWS role and point each service at the correct plugin name.
+
+## Testing web identity (real AWS)
+
+Test in three steps: LocalStack smoke for provider logic (`scripts/tests/smoke-test-awssm.sh`), then STS + Secrets Manager with only web identity (`scripts/tests/aws-web-identity-probe.sh`), then full plugin + Swarm (`scripts/tests/smoke-test-awssm-web-identity.sh`). See the repo doc `docs/aws-web-identity-poc.md` for environment variables and checklist.
 
 ## Secret Labels
 
