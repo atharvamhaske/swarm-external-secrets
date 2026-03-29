@@ -55,6 +55,7 @@ docker plugin set swarm-external-secrets:latest SECRETS_PROVIDER="openbao"
 ```
 
 For multi-instance usage (for example, Vault + OpenBao with separate plugin names in Swarm), see [`docs/multi-provider.md`](./docs/multi-provider.md).
+For an AWS SPIFFE/OIDC proof of concept with one plugin instance per AWS role, see [`docs/aws-web-identity-poc.md`](./docs/aws-web-identity-poc.md).
 
 ## New: Real-time Monitoring
 
@@ -153,6 +154,25 @@ docker plugin set swarm-external-secrets:latest \
     SECRETS_PROVIDER="aws" \
     AWS_REGION="us-west-2" \
     AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+```
+
+### AWS Secrets Manager via Web Identity
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="aws" \
+    AWS_REGION="us-west-2" \
+    AWS_ROLE_ARN="arn:aws:iam::123456789012:role/swarm-secrets" \
+    AWS_WEB_IDENTITY_TOKEN_FILE="/run/swarm-external-secrets/aws-web-identity-token"
+```
+
+### AWS Secrets Manager via Direct SPIFFE Workload API
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="aws" \
+    AWS_REGION="us-west-2" \
+    AWS_ROLE_ARN="arn:aws:iam::123456789012:role/swarm-secrets" \
+    AWS_SPIFFE_JWT_AUDIENCE="awssm" \
+    SPIFFE_ENDPOINT_SOCKET="unix:///run/spire/sockets/agent.sock"
 ```
 
 ### Azure Key Vault
