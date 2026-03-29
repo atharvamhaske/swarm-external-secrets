@@ -42,6 +42,11 @@ docker plugin set swarm-external-secrets:latest \
 | `AWS_ACCESS_KEY_ID` | AWS access key | — |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | — |
 | `AWS_PROFILE` | AWS profile name | — |
+| `AWS_ROLE_ARN` | IAM role ARN for web identity auth | — |
+| `AWS_WEB_IDENTITY_TOKEN_FILE` | Mounted token file for web identity auth | — |
+| `AWS_ROLE_SESSION_NAME` | Optional role session name | — |
+| `AWS_SPIFFE_JWT_AUDIENCE` | Audience used when fetching JWT-SVID directly from SPIRE | — |
+| `SPIFFE_ENDPOINT_SOCKET` | SPIFFE Workload API socket URI | `SPIFFE_ENDPOINT_SOCKET` env or `/run/spire/sockets/agent.sock` |
 
 **Example:**
 ```bash
@@ -50,6 +55,25 @@ docker plugin set swarm-external-secrets:latest \
     AWS_REGION="us-west-2" \
     AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE" \
     AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+```
+
+**Web Identity Example:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="aws" \
+    AWS_REGION="us-west-2" \
+    AWS_ROLE_ARN="arn:aws:iam::123456789012:role/swarm-secrets" \
+    AWS_WEB_IDENTITY_TOKEN_FILE="/run/swarm-external-secrets/aws-web-identity-token"
+```
+
+**Direct SPIFFE Workload API Example:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="aws" \
+    AWS_REGION="us-west-2" \
+    AWS_ROLE_ARN="arn:aws:iam::123456789012:role/swarm-secrets" \
+    AWS_SPIFFE_JWT_AUDIENCE="awssm" \
+    SPIFFE_ENDPOINT_SOCKET="unix:///run/spire/sockets/agent.sock"
 ```
 
 **Secret Labels:**
