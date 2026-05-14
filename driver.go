@@ -240,7 +240,7 @@ func (d *SecretsDriver) trackSecret(req secrets.Request, value []byte) {
 		secretPath = req.SecretName
 	}
 
-	log.Debugf("Current provider %s tracking secret: %s at path: %s with field: %s",
+	log.Tracef("Current provider %s tracking secret: %s at path: %s with field: %s",
 		d.provider.GetProviderName(), req.SecretName, secretPath, secretField)
 
 	secretInfo := &providers.SecretInfo{
@@ -272,7 +272,7 @@ func (d *SecretsDriver) trackSecret(req secrets.Request, value []byte) {
 		d.secretTracker[req.SecretName] = secretInfo
 	}
 
-	log.Debugf("Tracking secret: %s -> %s (provider: %s, services: %v)",
+	log.Tracef("Tracking secret: %s -> %s (provider: %s, services: %v)",
 		req.SecretName, secretPath, d.provider.GetProviderName(), secretInfo.ServiceNames)
 }
 
