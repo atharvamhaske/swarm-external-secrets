@@ -134,6 +134,7 @@ docker plugin set swarm-external-secrets:latest \
 4. Optional: enable plugin log sidecar (for `docker compose logs` visibility):
    ```bash
    sudo mkdir -p /run/swarm-external-secrets
+   sudo touch /run/swarm-external-secrets/plugin.log
    docker compose -f docker-compose.yml -f docker-compose.logs.yml up -d
    docker compose -f docker-compose.yml -f docker-compose.logs.yml logs -f secrets-logger
    ```

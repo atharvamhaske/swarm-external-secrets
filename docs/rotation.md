@@ -77,6 +77,8 @@ tail -F /run/swarm-external-secrets/plugin.log | grep -E "rotation|Failed to rot
 You can also expose these logs through the bundled compose override:
 
 ```bash
+sudo mkdir -p /run/swarm-external-secrets
+sudo touch /run/swarm-external-secrets/plugin.log
 docker compose -f docker-compose.yml -f docker-compose.logs.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.logs.yml logs -f secrets-logger
 ```
@@ -87,7 +89,7 @@ The sidecar service in `docker-compose.logs.yml` is:
 services:
   secrets-logger:
     image: alpine:3.20
-    command: sh -c "touch /run/swarm-external-secrets/plugin.log && tail -F /run/swarm-external-secrets/plugin.log"
+    command: sh -c "tail -F /run/swarm-external-secrets/plugin.log"
     volumes:
       - /run/swarm-external-secrets:/run/swarm-external-secrets:ro
 ```
