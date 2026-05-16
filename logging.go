@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -13,7 +14,6 @@ import (
 
 const (
 	defaultPluginLogPath = "/run/swarm-external-secrets/plugin.log"
-	defaultPluginLogDir  = "/run/swarm-external-secrets"
 	defaultMaxLogSize    = int64(10 * 1024 * 1024) // 10MB
 )
 
@@ -39,7 +39,7 @@ func newCappedFileWriter(path string, maxBytes int64) (*cappedFileWriter, error)
 		return nil, fmt.Errorf("create log directory: %w", err)
 	}
 
-	// #nosec G304 -- path is constrained to /run/swarm-external-secrets by validateLogPath.
+	// #nosec G304 -- path is the configured plugin log destination after basic path validation.
 	f, err := os.OpenFile(resolvedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open log file: %w", err)
@@ -84,25 +84,38 @@ func (w *cappedFileWriter) rotateIfNeeded(incoming int64) error {
 
 	rotatedPath := w.path + ".1"
 	if err := os.Remove(rotatedPath); err != nil && !os.IsNotExist(err) {
+		if reopenErr := w.reopenActiveFile(); reopenErr != nil {
+			return fmt.Errorf("remove previous rotated log: %w (reopen active log failed: %v)", err, reopenErr)
+		}
 		return fmt.Errorf("remove previous rotated log: %w", err)
 	}
 
 	if err := os.Rename(w.path, rotatedPath); err != nil && !os.IsNotExist(err) {
+		if reopenErr := w.reopenActiveFile(); reopenErr != nil {
+			return fmt.Errorf("rotate log file: %w (reopen active log failed: %v)", err, reopenErr)
+		}
 		return fmt.Errorf("rotate log file: %w", err)
 	}
 
-	// #nosec G304 -- writer path is validated during construction in newCappedFileWriter.
-	f, err := os.OpenFile(w.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
+	if err := w.reopenActiveFile(); err != nil {
 		return fmt.Errorf("reopen log file after rotation: %w", err)
 	}
 
+	return nil
+}
+
+func (w *cappedFileWriter) reopenActiveFile() error {
+	// #nosec G304 -- writer path is validated during construction in newCappedFileWriter.
+	f, err := os.OpenFile(w.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
 	w.file = f
 	return nil
 }
 
 func configureLogger(debugFlag bool) io.Closer {
-	level := parseLogLevel(getEnvOrDefault("PLUGIN_LOG_LEVEL", "info"), debugFlag)
+	level := configuredLogLevel(debugFlag)
 	log.SetLevel(level)
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
 
@@ -119,27 +132,72 @@ func configureLogger(debugFlag bool) io.Closer {
 	return writer
 }
 
-func parseLogLevel(raw string, debugFlag bool) log.Level {
+func configuredLogLevel(debugFlag bool) log.Level {
+	if raw, ok := os.LookupEnv("PLUGIN_LOG_LEVEL"); ok {
+		return parsePluginLogLevel(raw)
+	}
+
+	if raw, ok := os.LookupEnv("LOG_LEVEL"); ok {
+		return parseLegacyLogLevel(raw)
+	}
+
 	if debugFlag {
 		return log.DebugLevel
 	}
 
-	parsed, err := log.ParseLevel(strings.ToLower(strings.TrimSpace(raw)))
+	return log.DebugLevel
+}
+
+func parsePluginLogLevel(raw string) log.Level {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if numericLevel, err := strconv.Atoi(normalized); err == nil {
+		level, err := parseIntegerLogLevel(numericLevel)
+		if err != nil {
+			log.Errorf("invalid PLUGIN_LOG_LEVEL=%q: expected integer 0-6 or log level name; defaulting to debug", raw)
+			return log.DebugLevel
+		}
+		return level
+	}
+
+	parsed, err := log.ParseLevel(normalized)
 	if err != nil {
-		return log.InfoLevel
+		log.Errorf("invalid PLUGIN_LOG_LEVEL=%q: expected integer 0-6 or log level name; defaulting to debug", raw)
+		return log.DebugLevel
 	}
 	return parsed
+}
+
+func parseLegacyLogLevel(raw string) log.Level {
+	normalized := strings.TrimSpace(raw)
+	if normalized == "" {
+		return log.DebugLevel
+	}
+
+	numericLevel, err := strconv.Atoi(normalized)
+	if err != nil {
+		log.Errorf("invalid LOG_LEVEL=%q: expected integer 0-6; defaulting to debug", raw)
+		return log.DebugLevel
+	}
+
+	level, err := parseIntegerLogLevel(numericLevel)
+	if err != nil {
+		log.Errorf("invalid LOG_LEVEL=%q: expected integer 0-6; defaulting to debug", raw)
+		return log.DebugLevel
+	}
+	return level
+}
+
+func parseIntegerLogLevel(n int) (log.Level, error) {
+	if n < int(log.PanicLevel) || n > int(log.TraceLevel) {
+		return log.DebugLevel, fmt.Errorf("log level %d outside range 0-6", n)
+	}
+	return log.Level(n), nil
 }
 
 func validateLogPath(path string) (string, error) {
 	cleanPath := filepath.Clean(strings.TrimSpace(path))
 	if cleanPath == "." || cleanPath == string(filepath.Separator) {
 		return "", fmt.Errorf("invalid log path: %q", path)
-	}
-
-	defaultDir := filepath.Clean(defaultPluginLogDir) + string(filepath.Separator)
-	if !strings.HasPrefix(cleanPath, defaultDir) {
-		return "", fmt.Errorf("log path %q must be under %s", cleanPath, defaultPluginLogDir)
 	}
 
 	return cleanPath, nil
