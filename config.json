@@ -184,7 +184,7 @@
       "settable": ["value"]
     },
     {
-      "name": "PLUGIN_LOG_LEVEL",
+      "name": "LOG_LEVEL",
       "description": "Log level (debug, info, warn, error), default info",
       "settable": ["value"]
     },

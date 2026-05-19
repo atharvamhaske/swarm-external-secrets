@@ -133,7 +133,7 @@ func configureLogger(debugFlag bool) io.Closer {
 }
 
 func configuredLogLevel(debugFlag bool) log.Level {
-	if raw, ok := os.LookupEnv("PLUGIN_LOG_LEVEL"); ok {
+	if raw, ok := os.LookupEnv("LOG_LEVEL"); ok {
 		return parsePluginLogLevel(raw)
 	}
 
@@ -149,7 +149,7 @@ func parsePluginLogLevel(raw string) log.Level {
 	if numericLevel, err := strconv.Atoi(normalized); err == nil {
 		level, err := parseIntegerLogLevel(numericLevel)
 		if err != nil {
-			log.Errorf("invalid PLUGIN_LOG_LEVEL=%q: expected integer 0-6 or log level name; defaulting to debug", raw)
+			log.Errorf("invalidLOG_LEVEL=%q: expected integer 0-6 or log level name; defaulting to debug", raw)
 			return log.DebugLevel
 		}
 		return level
@@ -157,7 +157,7 @@ func parsePluginLogLevel(raw string) log.Level {
 
 	parsed, err := log.ParseLevel(normalized)
 	if err != nil {
-		log.Errorf("invalid PLUGIN_LOG_LEVEL=%q: expected integer 0-6 or log level name; defaulting to debug", raw)
+		log.Errorf("invalid LOG_LEVEL=%q: expected integer 0-6 or log level name; defaulting to debug", raw)
 		return log.DebugLevel
 	}
 	return parsed
