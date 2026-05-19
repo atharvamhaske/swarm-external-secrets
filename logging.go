@@ -137,10 +137,6 @@ func configuredLogLevel(debugFlag bool) log.Level {
 		return parsePluginLogLevel(raw)
 	}
 
-	if raw, ok := os.LookupEnv("LOG_LEVEL"); ok {
-		return parseLegacyLogLevel(raw)
-	}
-
 	if debugFlag {
 		return log.DebugLevel
 	}
