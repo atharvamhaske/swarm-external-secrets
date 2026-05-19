@@ -167,26 +167,6 @@ func parsePluginLogLevel(raw string) log.Level {
 	return parsed
 }
 
-func parseLegacyLogLevel(raw string) log.Level {
-	normalized := strings.TrimSpace(raw)
-	if normalized == "" {
-		return log.DebugLevel
-	}
-
-	numericLevel, err := strconv.Atoi(normalized)
-	if err != nil {
-		log.Errorf("invalid LOG_LEVEL=%q: expected integer 0-6; defaulting to debug", raw)
-		return log.DebugLevel
-	}
-
-	level, err := parseIntegerLogLevel(numericLevel)
-	if err != nil {
-		log.Errorf("invalid LOG_LEVEL=%q: expected integer 0-6; defaulting to debug", raw)
-		return log.DebugLevel
-	}
-	return level
-}
-
 func parseIntegerLogLevel(n int) (log.Level, error) {
 	if n < int(log.PanicLevel) || n > int(log.TraceLevel) {
 		return log.DebugLevel, fmt.Errorf("log level %d outside range 0-6", n)
