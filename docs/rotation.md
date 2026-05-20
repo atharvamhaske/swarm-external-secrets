@@ -67,11 +67,43 @@ docker plugin set swarm-external-secrets:latest \
 Check plugin logs to monitor rotation activity:
 
 ```bash
-# View plugin logs
-sudo journalctl -u docker.service -f | grep vault
+# View plugin logs from the shared host file
+tail -F /run/swarm-external-secrets/plugin.log
 
-# Check for rotation events
-docker service logs <service-name>
+# Filter rotation events
+tail -F /run/swarm-external-secrets/plugin.log | grep -E "rotation|Failed to rotate|Detected change"
+```
+
+On Linux, the default plugin log path is `/run/swarm-external-secrets/plugin.log`.
+macOS and Windows filesystems do not support this `/run/**` path by default. On
+those hosts, create a log directory with read/write permissions and set
+`PLUGIN_LOG_PATH` to that file:
+
+```bash
+mkdir -p ./logs
+touch ./logs/plugin.log
+docker plugin set swarm-external-secrets:latest \
+  PLUGIN_LOG_PATH="$PWD/logs/plugin.log"
+```
+
+You can also expose these logs through the bundled compose override:
+
+```bash
+sudo mkdir -p /run/swarm-external-secrets
+sudo touch /run/swarm-external-secrets/plugin.log
+docker compose -f docker-compose.yml -f docker-compose.logs.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.logs.yml logs -f secrets-logger
+```
+
+The sidecar service in `docker-compose.logs.yml` is:
+
+```yaml
+services:
+  secrets-logger:
+    image: alpine:3.20
+    command: sh -c "tail -F /run/swarm-external-secrets/plugin.log"
+    volumes:
+      - /run/swarm-external-secrets:/run/swarm-external-secrets:ro
 ```
 
 ## Benefits
