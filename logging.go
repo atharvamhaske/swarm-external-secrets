@@ -149,7 +149,7 @@ func parsePluginLogLevel(raw string) log.Level {
 	if numericLevel, err := strconv.Atoi(normalized); err == nil {
 		level, err := parseIntegerLogLevel(numericLevel)
 		if err != nil {
-			log.Errorf("invalidLOG_LEVEL=%q: expected integer 0-6 or log level name; defaulting to debug", raw)
+			log.Errorf("invalid LOG_LEVEL=%q: expected integer 0-6 or log level name; defaulting to debug", raw)
 			return log.DebugLevel
 		}
 		return level

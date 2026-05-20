@@ -77,6 +77,18 @@ The plugin now writes logs to a host-mounted file by default:
 tail -F /run/swarm-external-secrets/plugin.log
 ```
 
+On Linux, the default plugin log path is `/run/swarm-external-secrets/plugin.log`.
+macOS and Windows filesystems do not support this `/run/**` path by default. On
+those hosts, create a log directory with read/write permissions and set
+`PLUGIN_LOG_PATH` to that file:
+
+```bash
+mkdir -p ./logs
+touch ./logs/plugin.log
+docker plugin set swarm-external-secrets:latest \
+  PLUGIN_LOG_PATH="$PWD/logs/plugin.log"
+```
+
 You can override path and level:
 
 ```bash
@@ -111,6 +123,9 @@ The plugin mount for this path is defined in `config.json`, so make sure the hos
 sudo mkdir -p /run/swarm-external-secrets
 sudo touch /run/swarm-external-secrets/plugin.log
 ```
+
+For macOS and Windows, use the same read/write host directory configured with
+`PLUGIN_LOG_PATH` instead of `/run/swarm-external-secrets`.
 
 Daemon logs remain available for fallback troubleshooting:
 

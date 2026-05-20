@@ -74,6 +74,18 @@ tail -F /run/swarm-external-secrets/plugin.log
 tail -F /run/swarm-external-secrets/plugin.log | grep -E "rotation|Failed to rotate|Detected change"
 ```
 
+On Linux, the default plugin log path is `/run/swarm-external-secrets/plugin.log`.
+macOS and Windows filesystems do not support this `/run/**` path by default. On
+those hosts, create a log directory with read/write permissions and set
+`PLUGIN_LOG_PATH` to that file:
+
+```bash
+mkdir -p ./logs
+touch ./logs/plugin.log
+docker plugin set swarm-external-secrets:latest \
+  PLUGIN_LOG_PATH="$PWD/logs/plugin.log"
+```
+
 You can also expose these logs through the bundled compose override:
 
 ```bash
