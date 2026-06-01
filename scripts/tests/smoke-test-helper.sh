@@ -88,6 +88,8 @@ build_plugin() {
 
 # Enable plugin (mirrors test.sh pattern)
 enable_plugin() {
+    docker run --rm --entrypoint sh -v /run:/host-run busybox:latest -c "mkdir -p /host-run/swarm-external-secrets && touch /host-run/swarm-external-secrets/plugin.log"
+
     echo -e "${RED}Set plugin permissions${DEF}"
     docker plugin set "${PLUGIN_NAME}" gid=0 uid=0
 

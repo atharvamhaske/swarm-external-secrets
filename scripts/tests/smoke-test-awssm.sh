@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/smoke-test-helper.sh"
 
 # Configuration
 LOCALSTACK_CONTAINER="smoke-localstack"
+LOCALSTACK_IMAGE="${LOCALSTACK_IMAGE:-localstack/localstack:3.8.1}" // latest version has some auth error
 LOCALSTACK_ENDPOINT="http://localhost:4566"
 AWS_REGION="us-east-1"
 AWS_ACCESS_KEY_ID="test"
@@ -18,7 +19,9 @@ SECRET_PATH="database/mysql"
 SECRET_FIELD="password"
 SECRET_VALUE="awssm-smoke-pass-v1"
 SECRET_VALUE_ROTATED="awssm-smoke-pass-v2"
+BINARY_SECRET_VALUE="awssm-smoke-binary-pass"
 COMPOSE_FILE="${SCRIPT_DIR}/smoke-awssm-compose.yml"
+BINARY_SECRET_FILE=""
 
 # Helper to run awslocal either on host or inside container
 awslocal_cmd() {
@@ -38,8 +41,11 @@ cleanup() {
     remove_stack "${STACK_NAME}"
     docker secret rm "${SECRET_NAME}" 2>/dev/null || true
     if [ -n "${LOCALSTACK_CONTAINER}" ]; then
+        docker exec "${LOCALSTACK_CONTAINER}" rm -f "${BINARY_SECRET_FILE}" 2>/dev/null || true
         docker stop "${LOCALSTACK_CONTAINER}" 2>/dev/null || true
         docker rm   "${LOCALSTACK_CONTAINER}" 2>/dev/null || true
+    elif [ -n "${BINARY_SECRET_FILE}" ]; then
+        rm -f "${BINARY_SECRET_FILE}" 2>/dev/null || true
     fi
     remove_plugin
 }
@@ -55,13 +61,13 @@ else
         --name "${LOCALSTACK_CONTAINER}" \
         -p 4566:4566 \
         -e SERVICES=secretsmanager \
-        localstack/localstack:latest
+        "${LOCALSTACK_IMAGE}"
 fi
 
 # Wait for LocalStack to be ready
 info "Waiting for LocalStack to be ready..."
 elapsed=0
-until curl -s "${LOCALSTACK_ENDPOINT}/_localstack/health" | grep -q "available" 2>/dev/null; do
+until curl -s "${LOCALSTACK_ENDPOINT}/_localstack/health" >/dev/null 2>&1; do
     sleep 2
     elapsed=$((elapsed + 2))
     [ "${elapsed}" -lt 60 ] || die "LocalStack did not become ready within 60s."
@@ -128,21 +134,34 @@ log_stack "${STACK_NAME}" "app"
 info "Verifying rotated secret value..."
 verify_secret "${STACK_NAME}" "app" "${SECRET_NAME}" "${SECRET_VALUE_ROTATED}" 180
 
-
-BINARY_SECRET="awssm-smoke-binary"
-
-echo -n "${BINARY_SECRET}" > binary_secret
+# Rotate to a binary value and verify the provider decodes SecretBinary.
+info "Rotating secret to base64 encoded binary value in AWS Secrets Manager..."
+BINARY_SECRET_PAYLOAD="{\"${SECRET_FIELD}\":\"${BINARY_SECRET_VALUE}\"}"
+BINARY_SECRET_ENCODED="$(printf '%s' "${BINARY_SECRET_PAYLOAD}" | base64 | tr -d '\n')"
+if [ -n "${LOCALSTACK_CONTAINER}" ]; then
+    BINARY_SECRET_FILE="/tmp/awssm-binary-secret"
+    docker exec "${LOCALSTACK_CONTAINER}" sh -c "printf '%s' '${BINARY_SECRET_ENCODED}' > '${BINARY_SECRET_FILE}'"
+else
+    BINARY_SECRET_FILE="$(mktemp)"
+    printf '%s' "${BINARY_SECRET_ENCODED}" > "${BINARY_SECRET_FILE}"
+fi
 
 awslocal_cmd secretsmanager put-secret-value \
-  --region "${AWS_REGION}" \
-  --secret-id "${SECRET_PATH}" \
-  --secret-binary fileb://binary_secret \
-  --version-stages AWSCURRENT
+    --region "${AWS_REGION}" \
+    --secret-id "${SECRET_PATH}" \
+    --secret-binary "fileb://${BINARY_SECRET_FILE}" \
+    --version-stages AWSCURRENT
 
+success "Secret rotated to binary value: ${BINARY_SECRET_VALUE}"
 
+info "Waiting for plugin rotation interval..."
+sleep 30
+assert_no_sensitive_rotation_metadata_logs
+
+info "Logging service output after binary rotation..."
 log_stack "${STACK_NAME}" "app"
 
-verify_secret "${STACK_NAME}" "app" "${SECRET_NAME}" "${BINARY_SECRET}" 180
+info "Verifying decoded binary secret value..."
+verify_secret "${STACK_NAME}" "app" "${SECRET_NAME}" "${BINARY_SECRET_VALUE}" 180
 
 success "AWS Secrets Manager smoke test PASSED"
-
