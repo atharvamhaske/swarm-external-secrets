@@ -15,7 +15,7 @@ type Client interface {
 }
 
 type Secret struct {
-	Data map[string]interface{}
+	Data map[string]any
 	Auth *Auth
 }
 
