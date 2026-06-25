@@ -58,6 +58,7 @@ jobs:
           image-tag: 'latest'
           install-awslocal: 'true'
         env:
+          SERVICES: secretsmanager,kms
           LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
       - name: Init Docker Swarm
         run: docker swarm init
