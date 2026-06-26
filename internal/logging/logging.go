@@ -1,4 +1,4 @@
-package main
+package logging
 
 import (
 	"fmt"
@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	log "github.com/sirupsen/logrus"
+
+	"github.com/sugar-org/swarm-external-secrets/internal/utils"
 )
 
 const (
@@ -114,12 +116,12 @@ func (w *cappedFileWriter) reopenActiveFile() error {
 	return nil
 }
 
-func configureLogger(debugFlag bool) io.Closer {
+func ConfigureLogger(debugFlag bool) io.Closer {
 	level := configuredLogLevel(debugFlag)
 	log.SetLevel(level)
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
 
-	logPath := getEnvOrDefault("PLUGIN_LOG_PATH", defaultPluginLogPath)
+	logPath := utils.GetEnvOrDefault("PLUGIN_LOG_PATH", defaultPluginLogPath)
 	writer, err := newCappedFileWriter(logPath, defaultMaxLogSize)
 	if err != nil {
 		log.SetOutput(os.Stderr)

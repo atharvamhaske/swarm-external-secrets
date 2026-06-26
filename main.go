@@ -9,6 +9,8 @@ import (
 
 	"github.com/docker/go-plugins-helpers/secrets"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/sugar-org/swarm-external-secrets/internal/logging"
 )
 
 func main() {
@@ -22,7 +24,7 @@ func main() {
 		log.Println("Vault Secrets Provider v1.0.0")
 		return
 	}
-	logCloser := configureLogger(*flDebug)
+	logCloser := logging.ConfigureLogger(*flDebug)
 	if logCloser != nil {
 		defer func(c io.Closer) {
 			if err := c.Close(); err != nil {
