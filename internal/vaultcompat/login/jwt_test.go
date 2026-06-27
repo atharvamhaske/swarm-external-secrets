@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sugar-org/vault-swarm-plugin/internal/vaultcompat/jwtsource"
-	"github.com/sugar-org/vault-swarm-plugin/internal/vaultcompat/vclient"
+	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat/jwtsource"
+	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat/vclient"
 )
 
 type mockClient struct {
@@ -37,11 +37,7 @@ func TestJWT_Login(t *testing.T) {
 		}, nil
 	}}
 
-	method := JWT{
-		Path:   "jwt",
-		Role:   "swarm-external-secrets",
-		Source: jwtsource.Static{Value: "test.jwt.token"},
-	}
+	method := newJWTMethod(t, "jwt", "swarm-external-secrets", jwtsource.Static{Value: "test.jwt.token"})
 
 	result, err := method.Login(context.Background(), client)
 	if err != nil {
@@ -70,11 +66,7 @@ func TestJWT_Login_CustomAuthPath(t *testing.T) {
 		return &vclient.Secret{Auth: &vclient.Auth{ClientToken: "vault-token"}}, nil
 	}}
 
-	method := JWT{
-		Path:   "/oidc/",
-		Role:   "swarm-external-secrets",
-		Source: jwtsource.Static{Value: "test.jwt.token"},
-	}
+	method := newJWTMethod(t, "/oidc/", "swarm-external-secrets", jwtsource.Static{Value: "test.jwt.token"})
 
 	if _, err := method.Login(context.Background(), client); err != nil {
 		t.Fatalf("Login() error = %v", err)
@@ -86,7 +78,7 @@ func TestJWT_Login_CustomAuthPath(t *testing.T) {
 }
 
 func TestJWT_Login_MissingRole(t *testing.T) {
-	method := JWT{Source: jwtsource.Static{Value: "token"}}
+	method := newJWTMethod(t, "jwt", "", jwtsource.Static{Value: "token"})
 
 	_, err := method.Login(context.Background(), mockClient{})
 	if err == nil || err.Error() != "jwt role is required" {
@@ -99,25 +91,35 @@ func TestJWT_Login_NoClientToken(t *testing.T) {
 		return &vclient.Secret{}, nil
 	}}
 
-	method := JWT{
-		Role:   "swarm-external-secrets",
-		Source: jwtsource.Static{Value: "test.jwt.token"},
-	}
+	method := newJWTMethod(t, "jwt", "swarm-external-secrets", jwtsource.Static{Value: "test.jwt.token"})
 
 	_, err := method.Login(context.Background(), client)
-	if err == nil || err.Error() != "jwt login returned no client token" {
+	if err == nil || err.Error() != "login response did not include a client token" {
 		t.Fatalf("Login() error = %v", err)
 	}
 }
 
 func TestJWT_Login_SourceError(t *testing.T) {
-	method := JWT{
-		Role:   "swarm-external-secrets",
-		Source: jwtsource.Static{Value: ""},
-	}
+	method := newJWTMethod(t, "jwt", "swarm-external-secrets", jwtsource.Static{Value: ""})
 
 	_, err := method.Login(context.Background(), mockClient{})
-	if err == nil || err.Error() != "jwt value is empty" {
+	if err == nil || err.Error() != "static jwt is empty" {
 		t.Fatalf("Login() error = %v", err)
 	}
+}
+
+func newJWTMethod(t *testing.T, authPath, role string, source jwtsource.Source) Method {
+	t.Helper()
+
+	method, err := New(Config{
+		Method:      "jwt",
+		JWTAuthPath: authPath,
+		JWTRole:     role,
+		JWTSource:   source,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	return method
 }

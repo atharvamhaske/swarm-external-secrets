@@ -83,6 +83,9 @@ type jwtLogin struct {
 }
 
 func (j jwtLogin) Login(ctx context.Context, client vclient.Client) (*vclient.Auth, error) {
+	if j.role == "" {
+		return nil, fmt.Errorf("jwt role is required")
+	}
 	if j.source == nil {
 		return nil, fmt.Errorf("jwt source is required")
 	}

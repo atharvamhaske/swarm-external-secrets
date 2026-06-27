@@ -54,12 +54,20 @@ func TestVaultProvider_AuthenticateWithJWT(t *testing.T) {
 	}
 	defer func() { _ = provider.Close() }()
 
-	got, err := provider.GetSecret(t.Context(), secrets.Request{
+	req := secrets.Request{
 		SecretName: "fallback",
 		SecretLabels: map[string]string{
 			"vault_path":  "database/mysql",
 			"vault_field": "password",
 		},
+	}
+
+	got, err := provider.GetSecret(t.Context(), &SecretInfo{
+		DockerSecretName: req.SecretName,
+		SecretPath:       provider.BuildSecretPath(req),
+		SecretField:      req.SecretLabels[provider.GetSecretFieldLabel()],
+		Provider:         provider.GetProviderName(),
+		Labels:           req.SecretLabels,
 	})
 	if err != nil {
 		t.Fatalf("GetSecret() error = %v", err)
