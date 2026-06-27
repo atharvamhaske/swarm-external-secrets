@@ -37,7 +37,6 @@ func (b *Backend) GetSecret(ctx context.Context, secretInfo *utils.SecretInfo) (
 	log.Debugf("Reading secret from %s path: %s", b.config.ProviderName, secretInfo.SecretPath)
 
 	secret, err := b.client.Read(ctx, secretInfo.SecretPath)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to read secret from %s: %v", b.config.ProviderName, err)
 	}
