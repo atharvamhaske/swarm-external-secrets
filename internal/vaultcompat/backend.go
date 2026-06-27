@@ -38,7 +38,7 @@ func (b *Backend) GetSecret(ctx context.Context, secretInfo *utils.SecretInfo) (
 
 	secret, err := b.client.Read(ctx, secretInfo.SecretPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read secret from %s: %v", b.config.ProviderName, err)
+		return nil, fmt.Errorf("failed to read secret from %s: %w", b.config.ProviderName, err)
 	}
 	if secret == nil {
 		return nil, fmt.Errorf("secret not found at path: %s", secretInfo.SecretPath)
@@ -46,7 +46,7 @@ func (b *Backend) GetSecret(ctx context.Context, secretInfo *utils.SecretInfo) (
 
 	value, err := utils.ExtractSecretValueFromKV(secret.Data, secretInfo.SecretField)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract secret value: %v", err)
+		return nil, fmt.Errorf("failed to extract secret value: %w", err)
 	}
 
 	log.Debugf("Successfully retrieved secret from %s", b.config.ProviderName)
@@ -73,12 +73,12 @@ func newClient(cfg Config) (vclient.Client, error) {
 		apiConfig := openbaoapi.DefaultConfig()
 		apiConfig.Address = cfg.Address
 		if err := vclient.ConfigureOpenBaoTLS(apiConfig, tlsCfg); err != nil {
-			return nil, fmt.Errorf("failed to configure TLS: %v", err)
+			return nil, fmt.Errorf("failed to configure TLS: %w", err)
 		}
 
 		client, err := openbaoapi.NewClient(apiConfig)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create openbao client: %v", err)
+			return nil, fmt.Errorf("failed to create openbao client: %w", err)
 		}
 
 		return vclient.NewOpenBao(client), nil
@@ -86,12 +86,12 @@ func newClient(cfg Config) (vclient.Client, error) {
 		apiConfig := vaultapi.DefaultConfig()
 		apiConfig.Address = cfg.Address
 		if err := vclient.ConfigureHashiVaultTLS(apiConfig, tlsCfg); err != nil {
-			return nil, fmt.Errorf("failed to configure TLS: %v", err)
+			return nil, fmt.Errorf("failed to configure TLS: %w", err)
 		}
 
 		client, err := vaultapi.NewClient(apiConfig)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create vault client: %v", err)
+			return nil, fmt.Errorf("failed to create vault client: %w", err)
 		}
 
 		return vclient.NewHashiVault(client), nil
@@ -122,9 +122,9 @@ func authenticate(client vclient.Client, cfg Config) error {
 	if err != nil {
 		switch cfg.AuthMethod {
 		case "approle":
-			return fmt.Errorf("approle authentication failed: %v", err)
+			return fmt.Errorf("approle authentication failed: %w", err)
 		case "jwt":
-			return fmt.Errorf("jwt authentication failed: %v", err)
+			return fmt.Errorf("jwt authentication failed: %w", err)
 		default:
 			return err
 		}

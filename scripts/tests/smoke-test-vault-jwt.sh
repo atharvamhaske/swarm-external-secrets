@@ -39,6 +39,8 @@ generate_local_jwt() {
 }
 
 cleanup() {
+    EXIT_CODE=$?
+    set +e
     echo -e "${RED}Running Vault JWT smoke test cleanup...${DEF}"
     remove_stack "${STACK_NAME}"
     docker secret rm "${SECRET_NAME}" 2>/dev/null || true

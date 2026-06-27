@@ -114,8 +114,7 @@ func (c Config) buildJWTSource() (jwtsource.Source, error) {
 	var sources []jwtsource.Source
 	if c.JWTFile != "" {
 		sources = append(sources, jwtsource.File{Path: c.JWTFile})
-	}
-	if c.JWT != "" {
+	} else if c.JWT != "" {
 		sources = append(sources, jwtsource.Static{Value: c.JWT})
 	}
 
