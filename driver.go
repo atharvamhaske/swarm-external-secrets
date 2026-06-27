@@ -14,7 +14,6 @@ import (
 	"github.com/docker/docker/api/types/swarm"
 	dockerclient "github.com/docker/docker/client"
 	"github.com/docker/go-plugins-helpers/secrets"
-
 	log "github.com/sirupsen/logrus"
 
 	"github.com/sugar-org/swarm-external-secrets/internal/secrettransform"
