@@ -109,6 +109,31 @@
       "settable": ["value"]
     },
     {
+      "name": "OPENBAO_APPROLE_AUTH_PATH",
+      "description": "OpenBao AppRole auth mount path",
+      "settable": ["value"]
+    },
+    {
+      "name": "OPENBAO_JWT_ROLE",
+      "description": "OpenBao JWT auth role",
+      "settable": ["value"]
+    },
+    {
+      "name": "OPENBAO_JWT",
+      "description": "OpenBao JWT auth token",
+      "settable": ["value"]
+    },
+    {
+      "name": "OPENBAO_JWT_FILE",
+      "description": "Path to an OpenBao JWT auth token file",
+      "settable": ["value"]
+    },
+    {
+      "name": "OPENBAO_JWT_AUTH_PATH",
+      "description": "OpenBao JWT auth mount path",
+      "settable": ["value"]
+    },
+    {
       "name": "OPENBAO_AUTH_METHOD",
       "description": "OpenBao authentication method",
       "settable": ["value"]
