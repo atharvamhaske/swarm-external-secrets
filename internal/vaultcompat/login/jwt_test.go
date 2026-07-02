@@ -18,6 +18,8 @@ func (m mockClient) Write(ctx context.Context, path string, data map[string]any)
 	return m.write(ctx, path, data)
 }
 
+func (m mockClient) RenewSelf(context.Context, int) (*vclient.Auth, error) { return nil, nil }
+
 func (m mockClient) SetToken(string) {}
 
 func (m mockClient) Close() error { return nil }

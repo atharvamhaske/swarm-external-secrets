@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/docker/go-plugins-helpers/secrets"
 )
@@ -83,6 +85,79 @@ func TestVaultProvider_AuthenticateWithJWT(t *testing.T) {
 
 	if loginRequest.JWT != "test.jwt.token" {
 		t.Fatalf("login jwt = %q, want test.jwt.token", loginRequest.JWT)
+	}
+}
+
+func TestVaultProvider_RenewsJWTToken(t *testing.T) {
+	renewCalled := make(chan struct{})
+	var closeRenewCalled sync.Once
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/jwt/login":
+			_, _ = w.Write([]byte(`{"auth":{"client_token":"token-1","renewable":true,"lease_duration":1}}`))
+		case "/v1/auth/token/renew-self":
+			if r.Method != http.MethodPut {
+				t.Fatalf("renew method = %s, want PUT", r.Method)
+			}
+			if got := r.Header.Get("X-Vault-Token"); got != "token-1" {
+				t.Fatalf("renew X-Vault-Token = %q, want token-1", got)
+			}
+
+			closeRenewCalled.Do(func() {
+				close(renewCalled)
+			})
+			_, _ = w.Write([]byte(`{"auth":{"client_token":"token-2","renewable":true,"lease_duration":60}}`))
+		case "/v1/secret/data/database/mysql":
+			if got := r.Header.Get("X-Vault-Token"); got != "token-2" {
+				t.Fatalf("read X-Vault-Token = %q, want token-2", got)
+			}
+
+			_, _ = w.Write([]byte(`{"data":{"data":{"password":"renewed-secret"}}}`))
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := &VaultProvider{}
+	if err := provider.Initialize(map[string]string{
+		"VAULT_ADDR":        server.URL,
+		"VAULT_AUTH_METHOD": "jwt",
+		"VAULT_JWT_ROLE":    "swarm-external-secrets",
+		"VAULT_JWT":         "test.jwt.token",
+		"VAULT_MOUNT_PATH":  "secret",
+	}); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	defer func() { _ = provider.Close() }()
+
+	select {
+	case <-renewCalled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("token was not renewed")
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	req := secrets.Request{
+		SecretName: "fallback",
+		SecretLabels: map[string]string{
+			"vault_path":  "database/mysql",
+			"vault_field": "password",
+		},
+	}
+	got, err := provider.GetSecret(t.Context(), &SecretInfo{
+		DockerSecretName: req.SecretName,
+		SecretPath:       provider.BuildSecretPath(req),
+		SecretField:      req.SecretLabels[provider.GetSecretFieldLabel()],
+		Provider:         provider.GetProviderName(),
+		Labels:           req.SecretLabels,
+	})
+	if err != nil {
+		t.Fatalf("GetSecret() error = %v", err)
+	}
+	if string(got) != "renewed-secret" {
+		t.Fatalf("GetSecret() = %q, want renewed-secret", string(got))
 	}
 }
 

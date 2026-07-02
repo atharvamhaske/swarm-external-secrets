@@ -32,6 +32,22 @@ func (o *OpenBao) Write(ctx context.Context, path string, data map[string]any) (
 	return fromOpenBaoSecret(secret), nil
 }
 
+func (o *OpenBao) RenewSelf(ctx context.Context, increment int) (*Auth, error) {
+	secret, err := o.client.Auth().Token().RenewSelfWithContext(ctx, increment)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil || secret.Auth == nil {
+		return nil, nil
+	}
+
+	return &Auth{
+		ClientToken: secret.Auth.ClientToken,
+		Renewable:   secret.Auth.Renewable,
+		LeaseTTL:    secret.Auth.LeaseDuration,
+	}, nil
+}
+
 func (o *OpenBao) SetToken(token string) {
 	o.client.SetToken(token)
 }
