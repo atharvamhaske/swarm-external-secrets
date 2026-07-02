@@ -286,6 +286,52 @@ func TestBackend_CloseStopsRenewalWorker(t *testing.T) {
 	}
 }
 
+func TestNextRetryWaitCapsAtMax(t *testing.T) {
+	tests := []struct {
+		name string
+		in   time.Duration
+		want time.Duration
+	}{
+		{
+			name: "doubles below cap",
+			in:   5 * time.Second,
+			want: 10 * time.Second,
+		},
+		{
+			name: "caps at max",
+			in:   renewalRetryMaxWait,
+			want: renewalRetryMaxWait,
+		},
+		{
+			name: "does not exceed max",
+			in:   45 * time.Second,
+			want: renewalRetryMaxWait,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nextRetryWait(tt.in); got != tt.want {
+				t.Fatalf("nextRetryWait(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRetryDelayWithJitterStaysWithinExpectedRange(t *testing.T) {
+	base := 10 * time.Second
+
+	for range 100 {
+		got := retryDelayWithJitter(base)
+		if got < base {
+			t.Fatalf("retryDelayWithJitter(%v) = %v, want >= %v", base, got, base)
+		}
+		if got >= base+(base/2) {
+			t.Fatalf("retryDelayWithJitter(%v) = %v, want < %v", base, got, base+(base/2))
+		}
+	}
+}
+
 func newTestBackend(t *testing.T, client vclient.Client, auth *vclient.Auth) *Backend {
 	t.Helper()
 

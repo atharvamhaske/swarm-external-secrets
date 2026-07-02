@@ -2,7 +2,9 @@ package vaultcompat
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
@@ -16,8 +18,9 @@ import (
 )
 
 const (
-	minRenewalDelay  = time.Second
-	renewalRetryWait = 5 * time.Second
+	minRenewalDelay     = time.Second
+	renewalRetryWait    = 5 * time.Second
+	renewalRetryMaxWait = time.Minute
 )
 
 type Backend struct {
@@ -255,17 +258,41 @@ func (b *Backend) renewLoop() {
 			return
 		}
 
+		retryWait := renewalRetryWait
 		for {
 			if err := b.renewOrReauthenticate(b.renewCtx); err != nil {
 				log.Warnf("Failed to renew %s token: %v", b.config.ProviderName, err)
-				if !b.waitForRenewal(timer, renewalRetryWait) {
+				if !b.waitForRenewal(timer, retryDelayWithJitter(retryWait)) {
 					return
 				}
+				retryWait = nextRetryWait(retryWait)
 				continue
 			}
 			break
 		}
 	}
+}
+
+func nextRetryWait(current time.Duration) time.Duration {
+	next := current * 2
+	if next > renewalRetryMaxWait {
+		return renewalRetryMaxWait
+	}
+	return next
+}
+
+func retryDelayWithJitter(base time.Duration) time.Duration {
+	jitterLimit := base / 2
+	if jitterLimit <= 0 {
+		return base
+	}
+
+	jitter, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(jitterLimit)))
+	if err != nil {
+		return base
+	}
+
+	return base + time.Duration(jitter.Int64())
 }
 
 func (b *Backend) waitForRenewal(timer renewalTimer, delay time.Duration) bool {
