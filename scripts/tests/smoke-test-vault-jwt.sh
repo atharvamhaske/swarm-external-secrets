@@ -20,6 +20,13 @@ COMPOSE_FILE="${SCRIPT_DIR}/smoke-vault-compose.yml"
 POLICY_FILE="${REPO_ROOT}/vault_conf/admin.hcl"
 JWT_WORKDIR="$(mktemp -d)"
 JWT_ROLE="swarm-external-secrets"
+JWT_TOKEN_TTL="10s"
+JWT_TOKEN_MAX_TTL="25s"
+RENEWAL_WAIT_SECONDS=45
+LOG_EXPORT_DIR="${REPO_ROOT}/.tmp/smoke-vault-jwt"
+PLUGIN_LOG_PATH="/run/swarm-external-secrets/plugin.log"
+PLUGIN_LOG_EXPORT="${LOG_EXPORT_DIR}/plugin.log"
+DAEMON_LOG_EXPORT="${LOG_EXPORT_DIR}/docker-daemon.log"
 EXIT_CODE=0
 
 base64url() {
@@ -38,10 +45,70 @@ generate_local_jwt() {
     printf '%s.%s\n' "${unsigned}" "${signature}" > "${JWT_WORKDIR}/workload.jwt"
 }
 
+prepare_plugin_log_path() {
+    mkdir -p "${LOG_EXPORT_DIR}"
+    : > "${PLUGIN_LOG_EXPORT}"
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        info "Preparing plugin log path inside Docker Desktop VM..."
+        docker run --rm --privileged --pid=host justincormack/nsenter1 \
+            sh -lc "mkdir -p /run/swarm-external-secrets && touch '${PLUGIN_LOG_PATH}' && chmod -R 777 /run/swarm-external-secrets"
+        return
+    fi
+
+    info "Preparing plugin log path on Linux host..."
+    if [ "$(id -u)" -eq 0 ]; then
+        mkdir -p /run/swarm-external-secrets
+        touch "${PLUGIN_LOG_PATH}"
+        chmod -R 777 /run/swarm-external-secrets
+    else
+        sudo mkdir -p /run/swarm-external-secrets
+        sudo touch "${PLUGIN_LOG_PATH}"
+        sudo chmod -R 777 /run/swarm-external-secrets
+    fi
+}
+
+export_plugin_logs() {
+    mkdir -p "${LOG_EXPORT_DIR}"
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        docker run --rm --privileged --pid=host justincormack/nsenter1 \
+            sh -lc "cat '${PLUGIN_LOG_PATH}' 2>/dev/null" > "${PLUGIN_LOG_EXPORT}" || true
+    elif [ -r "${PLUGIN_LOG_PATH}" ]; then
+        cp "${PLUGIN_LOG_PATH}" "${PLUGIN_LOG_EXPORT}" || true
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo cp "${PLUGIN_LOG_PATH}" "${PLUGIN_LOG_EXPORT}" 2>/dev/null || true
+        sudo chown "$(id -u):$(id -g)" "${PLUGIN_LOG_EXPORT}" 2>/dev/null || true
+    fi
+
+    docker_daemon_logs > "${DAEMON_LOG_EXPORT}" || true
+    info "Exported plugin logs to: ${PLUGIN_LOG_EXPORT}"
+    info "Exported Docker daemon logs to: ${DAEMON_LOG_EXPORT}"
+}
+
+assert_log_contains_any() {
+    local description="$1"
+    shift
+
+    export_plugin_logs
+    local logs
+    logs="$(cat "${PLUGIN_LOG_EXPORT}" "${DAEMON_LOG_EXPORT}" 2>/dev/null || true)"
+
+    for expected in "$@"; do
+        if echo "${logs}" | grep -Fq "${expected}"; then
+            success "${description}: found '${expected}'"
+            return
+        fi
+    done
+
+    die "${description}: expected one of [$*]. See exported logs in ${LOG_EXPORT_DIR}"
+}
+
 cleanup() {
     EXIT_CODE=$?
     set +e
     echo -e "${RED}Running Vault JWT smoke test cleanup...${DEF}"
+    export_plugin_logs
     remove_stack "${STACK_NAME}"
     docker secret rm "${SECRET_NAME}" 2>/dev/null || true
     docker stop "${VAULT_CONTAINER}" 2>/dev/null || true
@@ -51,6 +118,8 @@ cleanup() {
     exit "${EXIT_CODE}"
 }
 trap cleanup EXIT
+
+prepare_plugin_log_path
 
 info "Starting HashiCorp Vault dev container..."
 docker run -d \
@@ -70,6 +139,12 @@ success "Vault is ready."
 
 info "Applying policy to Vault..."
 docker cp "${POLICY_FILE}" "${VAULT_CONTAINER}:/tmp/admin.hcl"
+docker exec "${VAULT_CONTAINER}" sh -lc 'cat >>/tmp/admin.hcl <<EOF
+
+path "auth/token/renew-self" {
+  capabilities = ["update"]
+}
+EOF'
 docker exec "${VAULT_CONTAINER}" \
     env VAULT_ADDR="${VAULT_ADDR}" VAULT_TOKEN="${VAULT_ROOT_TOKEN}" \
     vault policy write smoke-policy /tmp/admin.hcl
@@ -104,7 +179,8 @@ docker exec "${VAULT_CONTAINER}" \
         bound_audiences="vault" \
         bound_subject="swarm-external-secrets" \
         policies="smoke-policy" \
-        ttl="15m"
+        ttl="${JWT_TOKEN_TTL}" \
+        max_ttl="${JWT_TOKEN_MAX_TTL}"
 success "Vault JWT auth configured."
 
 WORKLOAD_JWT="$(tr -d '\n' < "${JWT_WORKDIR}/workload.jwt")"
@@ -121,7 +197,9 @@ docker plugin set "${PLUGIN_NAME}" \
     VAULT_JWT_AUTH_PATH="jwt" \
     VAULT_MOUNT_PATH="secret" \
     ENABLE_ROTATION="false" \
-    ENABLE_MONITORING="false"
+    ENABLE_MONITORING="false" \
+    LOG_LEVEL="debug" \
+    PLUGIN_LOG_PATH="${PLUGIN_LOG_PATH}"
 success "Plugin configured with Vault JWT auth."
 
 info "Enabling plugin..."
@@ -131,6 +209,25 @@ info "Deploying swarm stack..."
 deploy_stack "${COMPOSE_FILE}" "${STACK_NAME}" 60
 
 info "Verifying secret value matches expected password..."
+verify_secret "${STACK_NAME}" "app" "${SECRET_NAME}" "${SECRET_VALUE}" 60
+
+info "Waiting ${RENEWAL_WAIT_SECONDS}s for JWT token renewal and max-TTL re-auth paths..."
+sleep "${RENEWAL_WAIT_SECONDS}"
+export_plugin_logs
+
+assert_log_contains_any \
+    "JWT renewal path" \
+    "Successfully renewed vault token"
+
+assert_log_contains_any \
+    "JWT re-auth fallback path" \
+    "Renewing vault token failed, attempting re-authentication" \
+    "Successfully re-authenticated with vault"
+
+info "Re-deploying stack to prove reads still work after original token max TTL..."
+remove_stack "${STACK_NAME}"
+docker secret rm "${SECRET_NAME}" 2>/dev/null || true
+deploy_stack "${COMPOSE_FILE}" "${STACK_NAME}" 60
 verify_secret "${STACK_NAME}" "app" "${SECRET_NAME}" "${SECRET_VALUE}" 60
 
 success "Vault JWT smoke test PASSED"
