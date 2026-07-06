@@ -1,0 +1,43 @@
+name: AWS Kumo Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, alpha/provider-integration]
+
+jobs:
+  aws-kumo-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Start Kumo
+        run: |
+          docker run -d --name kumo -p 4566:4566 ghcr.io/sivchari/kumo:latest
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4566/ >/dev/null; then
+              echo "Kumo is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Kumo did not become ready within 30s"
+          docker logs kumo
+          exit 1
+
+      - name: Run Kumo tests
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_KMS_ENDPOINT: http://localhost:4566
+        run: |
+          go test ./providers/... ./internal/secrettransform/... -run Kumo -count=1 -v
