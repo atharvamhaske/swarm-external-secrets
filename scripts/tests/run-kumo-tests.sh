@@ -17,7 +17,7 @@ export AWS_KMS_ENDPOINT="${AWS_KMS_ENDPOINT:-${KUMO_ENDPOINT}}"
 started_container=0
 
 cleanup() {
-    if [ "${started_container}" -eq 1 ]; then
+    if [[ "${started_container}" -eq 1 ]]; then
         docker stop "${KUMO_CONTAINER}" >/dev/null 2>&1 || true
         docker rm "${KUMO_CONTAINER}" >/dev/null 2>&1 || true
     fi
@@ -29,7 +29,7 @@ wait_for_kumo() {
     until curl -sf "${KUMO_ENDPOINT}/" >/dev/null 2>&1; do
         sleep 1
         elapsed=$((elapsed + 1))
-        if [ "${elapsed}" -ge 30 ]; then
+        if [[ "${elapsed}" -ge 30 ]]; then
             echo "Kumo did not become ready at ${KUMO_ENDPOINT} within 30s" >&2
             exit 1
         fi
