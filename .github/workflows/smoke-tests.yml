@@ -80,4 +80,4 @@ jobs:
 
       - name: Run smoke test for doppler
         run: bash scripts/tests/smoke-test-doppler.sh
-        
+
