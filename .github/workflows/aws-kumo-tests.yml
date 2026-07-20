@@ -22,17 +22,11 @@ jobs:
 
       - name: Start Kumo
         run: |
-          docker run -d --name kumo -p 4566:4566 ghcr.io/sivchari/kumo:latest
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:4566/ >/dev/null; then
-              echo "Kumo is ready"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Kumo did not become ready within 30s"
-          docker logs kumo
-          exit 1
+          docker compose -f scripts/tests/kumo-compose.yml up -d --wait --wait-timeout 30 || {
+            echo "Kumo did not become healthy within 30s"
+            docker compose -f scripts/tests/kumo-compose.yml logs
+            exit 1
+          }
 
       - name: Run Kumo tests
         env:
