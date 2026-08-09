@@ -214,7 +214,53 @@ docker plugin set swarm-external-secrets:latest \
 
 ---
 
-### 6. GCP Secret Manager (Placeholder)
+### 6. Infisical
+
+**Provider Type:** `infisical`
+
+**Environment Variables:**
+
+| Variable | Description | Default |
+|---|---|---|
+| `INFISICAL_CLIENT_ID` | Machine identity Client ID (Universal Auth) | — |
+| `INFISICAL_CLIENT_SECRET` | Machine identity Client Secret (Universal Auth) | — |
+| `INFISICAL_TOKEN` | Pre-issued bearer/access token (optional if Universal Auth is set) | — |
+| `INFISICAL_PROJECT_ID` | Infisical project ID (required) | — |
+| `INFISICAL_ENVIRONMENT` | Environment slug (`dev`, `staging`, `prod`, …) | `dev` |
+| `INFISICAL_SECRET_PATH` | Default folder path for secrets | `/` |
+| `INFISICAL_SITE_URL` | Infisical site/API base URL | `https://app.infisical.com` |
+
+**Authentication:**
+
+- **Universal Auth (production):** set `INFISICAL_CLIENT_ID` + `INFISICAL_CLIENT_SECRET` for a machine identity.
+- **Access token:** set `INFISICAL_TOKEN` to a pre-issued Infisical bearer token (useful for short-lived testing).
+
+**Example (Universal Auth):**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="infisical" \
+    INFISICAL_CLIENT_ID="..." \
+    INFISICAL_CLIENT_SECRET="..." \
+    INFISICAL_PROJECT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" \
+    INFISICAL_ENVIRONMENT="prod" \
+    ENABLE_ROTATION="true" \
+    ROTATION_INTERVAL="30s"
+```
+
+**Secret Labels:**
+
+- `infisical_secret_name` — Infisical secret key (e.g. `MYSQL_PASSWORD`)
+- `infisical_project_id` — Optional per-secret project override
+- `infisical_environment` — Optional per-secret environment override
+- `infisical_secret_path` — Optional per-secret folder path override
+
+If `infisical_secret_name` is omitted, the Docker secret name is uppercased (`mysql_password` → `MYSQL_PASSWORD`).
+
+See [`docs/infisical.md`](./infisical.md) for machine-identity setup and smoke-test details.
+
+---
+
+### 7. GCP Secret Manager (Placeholder)
 
 **Provider Type:** `gcp`
 
@@ -289,6 +335,19 @@ secrets:
 ```
 
 For multiple Doppler configs, run separate plugin instances with different service tokens (one token per project+config), similar to the Vault + OpenBao pattern above.
+
+### Infisical
+
+```yaml
+secrets:
+  mysql_password:
+    driver: swarm-external-secrets:latest
+    labels:
+      infisical_secret_name: "MYSQL_PASSWORD"
+      # infisical_secret_path: "/database"
+```
+
+For multiple Infisical projects/environments, run separate plugin instances with different Universal Auth credentials or project IDs.
 
 ## Multiple Providers in the Same Swarm Cluster
 
@@ -391,6 +450,12 @@ secrets:
 - Config downloads are cached (default 30s) to reduce API calls; the cache is dropped on a webhook event so rotation sees fresh values immediately
 - Optional webhook listener enables event-driven rotation, verified via the `X-Doppler-Signature` HMAC-SHA256 header
 - Secret names default to the uppercased Docker secret name when `doppler_secret_name` is not set
+
+### Infisical
+- Uses the Infisical REST API (`/api/v4/secrets/{secretName}`) with Universal Auth or a bearer token
+- Machine identities authenticate via `POST /api/v1/auth/universal-auth/login`; access tokens are cached and refreshed before expiry
+- Supports per-secret overrides for project, environment, and folder path
+- Secret names default to the uppercased Docker secret name when `infisical_secret_name` is not set
 
 ### GCP Secret Manager
 - Currently a placeholder — will error on initialization
