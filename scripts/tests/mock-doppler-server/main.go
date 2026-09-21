@@ -83,7 +83,7 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(payload)
+	_, _ = w.Write(payload) // #nosec G705 -- local mock returns JSON, not HTML
 }
 
 func (s *server) handleSetSecret(w http.ResponseWriter, r *http.Request) {

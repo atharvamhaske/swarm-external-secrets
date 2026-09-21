@@ -2,11 +2,12 @@ package providers
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -480,7 +481,11 @@ func dopplerJitter(attempt int) time.Duration {
 	if ceiling < dopplerRetryBase {
 		ceiling = dopplerRetryBase
 	}
-	return time.Duration(rand.Int64N(int64(ceiling) + 1))
+	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(ceiling)+1))
+	if err != nil {
+		return ceiling / 2
+	}
+	return time.Duration(n.Int64())
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) error {
