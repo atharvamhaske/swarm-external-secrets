@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        provider: [vault, openbao, infisical]
+        provider: [vault, openbao]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,8 +32,24 @@ jobs:
         run: docker swarm init
 
       - name: Run smoke test for ${{ matrix.provider }}
-        # Infisical vars are only consumed by the infisical script (real account;
-        # no mock). Ignored by the other providers.
+        run: bash scripts/tests/smoke-test-${{ matrix.provider }}.sh
+
+  # Real Infisical credentials are withheld from fork pull requests and
+  # Dependabot. Same-repository runs still fail when those secrets are unset.
+  smoke-test-infisical:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.fork == false && github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Init Docker Swarm
+        run: docker swarm init
+
+      - name: Run smoke test for infisical
         env:
           INFISICAL_PROJECT_ID: ${{ secrets.INFISICAL_PROJECT_ID }}
           INFISICAL_SMOKE_TOKEN: ${{ secrets.INFISICAL_SMOKE_TOKEN }}
@@ -42,7 +58,7 @@ jobs:
           INFISICAL_ENVIRONMENT: ${{ vars.INFISICAL_SMOKE_ENVIRONMENT }}
           INFISICAL_SECRET_PATH: ${{ vars.INFISICAL_SMOKE_SECRET_PATH }}
           INFISICAL_SITE_URL: ${{ vars.INFISICAL_SMOKE_SITE_URL }}
-        run: bash scripts/tests/smoke-test-${{ matrix.provider }}.sh
+        run: bash scripts/tests/smoke-test-infisical.sh
 
   smoke-test-kv-custom-path:
     runs-on: ubuntu-latest

@@ -149,18 +149,16 @@ func TestInfisicalProviderGetSecretCanceled(t *testing.T) {
 func TestInfisicalProviderGetSecretHonorsContextDeadline(t *testing.T) {
 	t.Parallel()
 
-	release := make(chan struct{})
+	sawCancel := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/api/v3/secrets/raw/") {
 			http.NotFound(w, r)
 			return
 		}
-		<-release
+		<-r.Context().Done()
+		close(sawCancel)
 	}))
-	defer func() {
-		close(release)
-		server.Close()
-	}()
+	t.Cleanup(server.Close)
 
 	p := infisicalProviderForServer(t, server.URL, "st.test")
 	defer func() { _ = p.Close() }()
@@ -179,6 +177,47 @@ func TestInfisicalProviderGetSecretHonorsContextDeadline(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("GetSecret() returned after %v, want return on context deadline", elapsed)
+	}
+
+	select {
+	case <-sawCancel:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not observe request cancellation")
+	}
+}
+
+func TestInfisicalProviderRetriesTooManyRequests(t *testing.T) {
+	t.Parallel()
+
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"message":"slow down"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"secret":{"secretValue":"secret-value"}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	p := infisicalProviderForServer(t, server.URL, "st.test")
+	defer func() { _ = p.Close() }()
+
+	got, err := p.GetSecret(context.Background(), &SecretInfo{
+		DockerSecretName: "db_password",
+		SecretPath:       "proj-1/dev/DB_PASSWORD",
+	})
+	if err != nil {
+		t.Fatalf("GetSecret() error = %v", err)
+	}
+	if string(got) != "secret-value" {
+		t.Fatalf("GetSecret() = %q, want secret-value", got)
+	}
+	if calls != 2 {
+		t.Fatalf("requests = %d, want 2", calls)
 	}
 }
 
