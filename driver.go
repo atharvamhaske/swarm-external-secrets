@@ -171,7 +171,9 @@ func (d *SecretsDriver) startWebhookServer() error {
 		return err
 	}
 	d.webhookServer = server
-	d.webhookServer.Start()
+	if err := d.webhookServer.Start(); err != nil {
+		return err
+	}
 	return nil
 }
 

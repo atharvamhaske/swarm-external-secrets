@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -62,6 +63,9 @@ func New(addr, path, secret string, allowUnsigned bool, onEvent func(Payload)) (
 	if path == "" {
 		path = defaultPath
 	}
+	if !strings.HasPrefix(path, "/") {
+		return nil, fmt.Errorf("webhook path must start with /")
+	}
 	secret = strings.TrimSpace(secret)
 	if secret == "" && !allowUnsigned {
 		return nil, fmt.Errorf("webhook signing secret is required")
@@ -86,14 +90,20 @@ func New(addr, path, secret string, allowUnsigned bool, onEvent func(Payload)) (
 	return s, nil
 }
 
-// Start begins serving in the background.
-func (s *Server) Start() {
+// Start binds the listener and then serves in the background. A bind failure
+// is returned so plugin initialization can fail instead of reporting success.
+func (s *Server) Start() error {
+	listener, err := net.Listen("tcp", s.server.Addr)
+	if err != nil {
+		return fmt.Errorf("start webhook listener: %w", err)
+	}
 	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			log.Errorf("Webhook server error: %v", err)
 		}
 	}()
 	log.Infof("Started Doppler webhook listener on %s%s", s.server.Addr, s.path)
+	return nil
 }
 
 // Stop gracefully shuts down the webhook listener.

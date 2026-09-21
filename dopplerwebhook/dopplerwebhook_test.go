@@ -80,6 +80,23 @@ func TestNewRequiresSigningSecret(t *testing.T) {
 	}
 }
 
+func TestNewRejectsPathWithoutSlash(t *testing.T) {
+	_, err := New(":0", "webhooks/doppler", "whsec", false, nil)
+	if err == nil {
+		t.Fatal("New() error = nil, want path rejected")
+	}
+}
+
+func TestStartReturnsBindError(t *testing.T) {
+	s, err := New("127.0.0.1:-1", "/webhooks/doppler", "whsec", false, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := s.Start(); err == nil {
+		t.Fatal("Start() error = nil, want bind error")
+	}
+}
+
 func TestServer_HandleTriggersEvent(t *testing.T) {
 	const secret = "whsec"
 	body := `{"type":"config.secrets.update","diff":{"updated":["FOO"]}}`

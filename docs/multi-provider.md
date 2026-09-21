@@ -254,7 +254,7 @@ The plugin resolves which secret to fetch using the following logic:
 | `DOPPLER_CONFIG` | Doppler config/environment (`dev`, `stg`, `prd`) | — |
 | `DOPPLER_API_URL` | API origin. HTTP is allowed only for loopback hosts. The client always uses the v3 API. | `https://api.doppler.com` |
 | `DOPPLER_CACHE_TTL` | Cache duration for secret downloads | `30s` |
-| `DOPPLER_WEBHOOK_SECRET` | Signing secret used to verify `X-Doppler-Signature`. Required when the listener is enabled. | — |
+| `DOPPLER_WEBHOOK_SECRET` | Signing secret used to verify `X-Doppler-Signature`. Required when the listener is enabled unless `DOPPLER_WEBHOOK_INSECURE=true`. | — |
 | `DOPPLER_WEBHOOK_INSECURE` | Accept unsigned webhooks. Local development only. | `false` |
 | `DOPPLER_WEBHOOK_ENABLE` | Enable the webhook listener for event-driven rotation | `false` |
 | `DOPPLER_WEBHOOK_PORT` | Port for the webhook listener (host network) | `8081` |
@@ -307,7 +307,7 @@ docker plugin set swarm-external-secrets:latest \
 
 - On a `config.secrets.update` delivery, the plugin verifies the `X-Doppler-Signature` HMAC-SHA256 header against `DOPPLER_WEBHOOK_SECRET`, drops its Doppler cache, and runs a rotation check right away.
 - The plugin runs with host networking, so the endpoint is reachable at `http://<host>:<DOPPLER_WEBHOOK_PORT><DOPPLER_WEBHOOK_PATH>`. Point the Doppler webhook (and any signing secret) at that URL.
-- `DOPPLER_WEBHOOK_SECRET` is required while the listener is enabled. `DOPPLER_WEBHOOK_INSECURE=true` accepts unsigned requests and is only for local development.
+- `DOPPLER_WEBHOOK_SECRET` is required while the listener is enabled unless `DOPPLER_WEBHOOK_INSECURE=true`, which accepts unsigned requests and is only for local development.
 - Webhook delivery is best-effort; the poll-based `ROTATION_INTERVAL` remains the safety net. Each rotation cycle drops the cache once, then downloads the tracked secret names for that project and config in one request.
 
 ---
