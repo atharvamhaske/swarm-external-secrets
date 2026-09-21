@@ -28,7 +28,7 @@ func TestServer_VerifySignature(t *testing.T) {
 		want   bool
 	}{
 		{
-			name:   "no secret configured skips verification",
+			name:   "unsigned allowed when explicitly enabled",
 			secret: "",
 			header: "",
 			want:   true,
@@ -61,11 +61,22 @@ func TestServer_VerifySignature(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := New(":0", "/webhooks/doppler", tt.secret, nil)
+			allowUnsigned := tt.secret == ""
+			s, err := New(":0", "/webhooks/doppler", tt.secret, allowUnsigned, nil)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 			if got := s.verifySignature(tt.header, body); got != tt.want {
 				t.Fatalf("verifySignature() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewRequiresSigningSecret(t *testing.T) {
+	_, err := New(":0", "/webhooks/doppler", "", false, nil)
+	if err == nil {
+		t.Fatal("New() error = nil, want missing signing secret")
 	}
 }
 
@@ -259,7 +270,10 @@ func TestServer_HandleOversizedBodyTruncated(t *testing.T) {
 
 func postWebhook(t *testing.T, secret string, onEvent func(Payload), method, body, signature string) *http.Response {
 	t.Helper()
-	s := New(":0", "/webhooks/doppler", secret, onEvent)
+	s, err := New(":0", "/webhooks/doppler", secret, false, onEvent)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 	srv := httptest.NewServer(s.server.Handler)
 	t.Cleanup(srv.Close)
 

@@ -85,7 +85,7 @@ func GetProviderInfo(providerType string) (map[string]string, error) {
 		info["name"] = "Doppler"
 		info["description"] = "Doppler secrets management platform"
 		info["auth_methods"] = "service token, CLI token"
-		info["env_vars"] = "DOPPLER_TOKEN, DOPPLER_PROJECT, DOPPLER_CONFIG, DOPPLER_API_URL, DOPPLER_CACHE_TTL"
+		info["env_vars"] = "DOPPLER_TOKEN, DOPPLER_PROJECT, DOPPLER_CONFIG, DOPPLER_API_URL, DOPPLER_CACHE_TTL, DOPPLER_WEBHOOK_SECRET, DOPPLER_WEBHOOK_INSECURE"
 
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)

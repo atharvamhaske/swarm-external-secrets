@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -74,7 +75,7 @@ func (s *server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := json.Marshal(s.snapshot())
+	payload, err := json.Marshal(s.filtered(r))
 	if err != nil {
 		http.Error(w, "failed to encode secrets", http.StatusInternalServerError)
 		return
@@ -117,6 +118,23 @@ func (s *server) handleSetSecret(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) authorize(r *http.Request) bool {
 	return r.Header.Get("Authorization") == fmt.Sprintf("Bearer %s", s.token)
+}
+
+func (s *server) filtered(r *http.Request) map[string]string {
+	all := s.snapshot()
+	raw := strings.TrimSpace(r.URL.Query().Get("secrets"))
+	if raw == "" {
+		return all
+	}
+
+	filtered := make(map[string]string)
+	for _, name := range strings.Split(raw, ",") {
+		name = strings.TrimSpace(name)
+		if value, ok := all[name]; ok {
+			filtered[name] = value
+		}
+	}
+	return filtered
 }
 
 func (s *server) snapshot() map[string]string {

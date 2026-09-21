@@ -345,7 +345,7 @@
     },
     {
       "name": "DOPPLER_API_URL",
-      "description": "Doppler API base URL (default https://api.doppler.com)",
+      "description": "Doppler API origin (default https://api.doppler.com). HTTP is allowed only for loopback hosts.",
       "settable": ["value"]
     },
     {
@@ -355,7 +355,12 @@
     },
     {
       "name": "DOPPLER_WEBHOOK_SECRET",
-      "description": "Doppler webhook signing secret used to verify X-Doppler-Signature",
+      "description": "Doppler webhook signing secret used to verify X-Doppler-Signature. Required when DOPPLER_WEBHOOK_ENABLE=true.",
+      "settable": ["value"]
+    },
+    {
+      "name": "DOPPLER_WEBHOOK_INSECURE",
+      "description": "Accept unsigned Doppler webhooks (true/false). Local development only, default false",
       "settable": ["value"]
     },
     {

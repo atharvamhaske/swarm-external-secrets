@@ -3,11 +3,15 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"maps"
+	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +25,13 @@ import (
 const (
 	defaultDopplerAPIURL   = "https://api.doppler.com"
 	defaultDopplerCacheTTL = 30 * time.Second
-	dopplerDownloadPath    = "/v3/configs/config/secrets/download"
+
+	// dopplerAPIVersion is owned by this client. DOPPLER_API_URL is only the
+	// origin; a future API would need its own request and response models.
+	dopplerAPIVersion = "v3"
+
+	dopplerMaxAttempts = 3
+	dopplerRetryBase   = 100 * time.Millisecond
 
 	// maxDopplerResponseBytes caps how much of an API response we read into
 	// memory, guarding against a misbehaving or compromised server.
@@ -35,6 +45,9 @@ type DopplerProvider struct {
 	cache      map[dopplerCacheKey]dopplerCacheEntry
 	cacheMu    sync.RWMutex
 	fetchMu    sync.Mutex
+	// generation invalidates in-flight downloads. It is bumped only while
+	// fetchMu is held, and a response is stored only when it still matches.
+	generation uint64
 }
 
 // DopplerConfig holds configuration for the Doppler API client.
@@ -46,14 +59,39 @@ type DopplerConfig struct {
 	CacheTTL   time.Duration
 }
 
+// DopplerAPIError is a non-success response from the Doppler API.
+type DopplerAPIError struct {
+	Status    int
+	RequestID string
+	Messages  []string
+}
+
+func (e *DopplerAPIError) Error() string {
+	detail := "request failed"
+	if len(e.Messages) > 0 {
+		detail = strings.Join(e.Messages, "; ")
+	}
+	if e.RequestID != "" {
+		return fmt.Sprintf("doppler api status %d (request %s): %s", e.Status, e.RequestID, detail)
+	}
+	return fmt.Sprintf("doppler api status %d: %s", e.Status, detail)
+}
+
 type dopplerCacheKey struct {
 	project string
 	config  string
+	secret  string
 }
 
 type dopplerCacheEntry struct {
-	secrets   map[string]string
-	fetchedAt time.Time
+	value      string
+	fetchedAt  time.Time
+	generation uint64
+}
+
+type dopplerConfigKey struct {
+	project string
+	config  string
 }
 
 // Initialize sets up the Doppler provider with the given configuration.
@@ -104,14 +142,9 @@ func (d *DopplerProvider) GetSecret(ctx context.Context, secretInfo *SecretInfo)
 
 	log.Debugf("Reading secret from Doppler: %s (project=%s, config=%s)", secretName, project, configName)
 
-	secretsMap, err := d.getConfigSecrets(ctx, project, configName)
+	value, err := d.getSecretValue(ctx, project, configName, secretName)
 	if err != nil {
 		return nil, err
-	}
-
-	value, ok := secretsMap[secretName]
-	if !ok {
-		return nil, fmt.Errorf("secret %q not found in Doppler config", secretName)
 	}
 
 	log.Debug("Successfully retrieved secret from Doppler")
@@ -146,22 +179,55 @@ func (d *DopplerProvider) Close() error {
 }
 
 // CacheInvalidator is an optional interface for providers that cache secret
-// lookups. When implemented, the driver drops cached data before a
-// webhook-triggered rotation check so the next read fetches fresh values.
+// lookups. The driver drops that cache when a webhook says values changed.
 //
-// This is Doppler-only: DopplerProvider is the sole implementer, which is why
-// the interface lives here rather than in the shared interface.go. Other
-// providers don't cache, so the driver's type assertion simply skips them.
+// DopplerProvider is the only implementer, so the interface lives here rather
+// than in interface.go. Providers that do not cache are skipped.
 type CacheInvalidator interface {
 	InvalidateCache()
 }
 
-// InvalidateCache drops all cached Doppler config downloads so the next read
-// fetches fresh values. Used for webhook-driven rotation.
+// ReconciliationPreparer is an optional interface for providers that should
+// refresh cached secrets once per rotation cycle. One call can fill the cache
+// for every secret in a config, so the checks that follow share that download.
+type ReconciliationPreparer interface {
+	PrepareReconciliation(ctx context.Context, infos []*SecretInfo) error
+}
+
+// InvalidateCache drops cached Doppler downloads. It takes fetchMu before
+// cacheMu, same as the fetch path, and bumps generation so a response that
+// started earlier cannot be stored afterward.
 func (d *DopplerProvider) InvalidateCache() {
-	d.cacheMu.Lock()
-	defer d.cacheMu.Unlock()
-	d.cache = make(map[dopplerCacheKey]dopplerCacheEntry)
+	d.fetchMu.Lock()
+	defer d.fetchMu.Unlock()
+	d.invalidateLocked()
+}
+
+// PrepareReconciliation drops the cache and downloads the named secrets once
+// per project and config. Later GetSecret calls in the same cycle reuse it.
+func (d *DopplerProvider) PrepareReconciliation(ctx context.Context, infos []*SecretInfo) error {
+	groups := d.groupSecretInfos(infos)
+
+	d.fetchMu.Lock()
+	defer d.fetchMu.Unlock()
+	generation := d.invalidateLocked()
+
+	var joined error
+	for key, names := range groups {
+		secretsMap, err := d.downloadSecrets(ctx, key.project, key.config, names)
+		if err != nil {
+			joined = errors.Join(joined, err)
+			continue
+		}
+		for _, name := range names {
+			value, ok := secretsMap[name]
+			if !ok {
+				continue
+			}
+			d.store(dopplerCacheKey{project: key.project, config: key.config, secret: name}, value, generation)
+		}
+	}
+	return joined
 }
 
 func (d *DopplerProvider) resolveSecretNameFromRequest(req secrets.Request) string {
@@ -203,12 +269,37 @@ func (d *DopplerProvider) parseSecretPath(secretPath string) (string, string) {
 	return parts[0], parts[1]
 }
 
+func (d *DopplerProvider) groupSecretInfos(infos []*SecretInfo) map[dopplerConfigKey][]string {
+	groups := make(map[dopplerConfigKey][]string)
+	seen := make(map[dopplerConfigKey]map[string]struct{})
+	for _, info := range infos {
+		if info == nil {
+			continue
+		}
+		name := d.resolveSecretName(info)
+		if name == "" {
+			continue
+		}
+		project, configName := d.parseSecretPath(info.SecretPath)
+		key := dopplerConfigKey{project: project, config: configName}
+		if seen[key] == nil {
+			seen[key] = make(map[string]struct{})
+		}
+		if _, ok := seen[key][name]; ok {
+			continue
+		}
+		seen[key][name] = struct{}{}
+		groups[key] = append(groups[key], name)
+	}
+	return groups
+}
+
 func isDopplerServiceToken(token string) bool {
 	return strings.HasPrefix(token, "dp.st.")
 }
 
 func validateDopplerAPIURL(raw string) (string, error) {
-	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("DOPPLER_API_URL is required")
 	}
@@ -217,68 +308,126 @@ func validateDopplerAPIURL(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid DOPPLER_API_URL: %w", err)
 	}
-	if parsed.Scheme != "https" && parsed.Scheme != "http" {
-		return "", fmt.Errorf("DOPPLER_API_URL must use http or https scheme")
-	}
 	if parsed.Host == "" {
 		return "", fmt.Errorf("DOPPLER_API_URL must include a host")
 	}
 	if parsed.User != nil {
 		return "", fmt.Errorf("DOPPLER_API_URL must not include userinfo")
 	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("DOPPLER_API_URL must not include a query or fragment")
+	}
+	if path := strings.Trim(parsed.EscapedPath(), "/"); path != "" {
+		return "", fmt.Errorf("DOPPLER_API_URL must be an origin; the API version is fixed by the client")
+	}
 
-	return parsed.Scheme + "://" + parsed.Host + strings.TrimRight(parsed.EscapedPath(), "/"), nil
+	switch parsed.Scheme {
+	case "https":
+	case "http":
+		if !isLoopbackHost(parsed.Hostname()) {
+			return "", fmt.Errorf("DOPPLER_API_URL must use https except for loopback hosts")
+		}
+	default:
+		return "", fmt.Errorf("DOPPLER_API_URL must use https")
+	}
+
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
-func (d *DopplerProvider) getConfigSecrets(
-	ctx context.Context,
-	project string,
-	configName string,
-) (map[string]string, error) {
-	cacheKey := dopplerCacheKey{project: project, config: configName}
-
-	d.cacheMu.RLock()
-	if entry, ok := d.cache[cacheKey]; ok && time.Since(entry.fetchedAt) < d.config.CacheTTL {
-		cached := cloneSecretsMap(entry.secrets)
-		d.cacheMu.RUnlock()
-		return cached, nil
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
 	}
-	d.cacheMu.RUnlock()
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func dopplerSecretsDownloadPath() string {
+	path, err := url.JoinPath("/", dopplerAPIVersion, "configs", "config", "secrets", "download")
+	if err != nil {
+		return "/" + dopplerAPIVersion + "/configs/config/secrets/download"
+	}
+	return path
+}
+
+func (d *DopplerProvider) getSecretValue(ctx context.Context, project, configName, secretName string) (string, error) {
+	if secretName == "" {
+		return "", fmt.Errorf("doppler secret name is required")
+	}
+	key := dopplerCacheKey{project: project, config: configName, secret: secretName}
+	if value, ok := d.cachedValue(key); ok {
+		return value, nil
+	}
 
 	d.fetchMu.Lock()
 	defer d.fetchMu.Unlock()
 
-	// Double-check after acquiring fetch lock so concurrent callers share one refresh.
-	d.cacheMu.RLock()
-	if entry, ok := d.cache[cacheKey]; ok && time.Since(entry.fetchedAt) < d.config.CacheTTL {
-		cached := cloneSecretsMap(entry.secrets)
-		d.cacheMu.RUnlock()
-		return cached, nil
+	if value, ok := d.cachedValue(key); ok {
+		return value, nil
 	}
-	d.cacheMu.RUnlock()
+	generation := d.generationSnapshot()
 
-	secretsMap, err := d.downloadSecrets(ctx, project, configName)
+	secretsMap, err := d.downloadSecrets(ctx, project, configName, []string{secretName})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-
-	d.cacheMu.Lock()
-	d.cache[cacheKey] = dopplerCacheEntry{
-		secrets:   cloneSecretsMap(secretsMap),
-		fetchedAt: time.Now(),
+	value, ok := secretsMap[secretName]
+	if !ok {
+		return "", fmt.Errorf("secret %q not found in Doppler config", secretName)
 	}
-	d.cacheMu.Unlock()
-
-	return secretsMap, nil
+	d.store(key, value, generation)
+	return value, nil
 }
 
-func (d *DopplerProvider) downloadSecrets(ctx context.Context, project, configName string) (map[string]string, error) {
-	endpoint, err := url.Parse(d.config.APIBaseURL + dopplerDownloadPath)
+func (d *DopplerProvider) invalidateLocked() uint64 {
+	d.cacheMu.Lock()
+	defer d.cacheMu.Unlock()
+	d.generation++
+	d.cache = make(map[dopplerCacheKey]dopplerCacheEntry)
+	return d.generation
+}
+
+func (d *DopplerProvider) generationSnapshot() uint64 {
+	d.cacheMu.RLock()
+	defer d.cacheMu.RUnlock()
+	return d.generation
+}
+
+func (d *DopplerProvider) cachedValue(key dopplerCacheKey) (string, bool) {
+	d.cacheMu.RLock()
+	defer d.cacheMu.RUnlock()
+
+	entry, ok := d.cache[key]
+	if !ok || entry.generation != d.generation || time.Since(entry.fetchedAt) >= d.config.CacheTTL {
+		return "", false
+	}
+	return entry.value, true
+}
+
+func (d *DopplerProvider) store(key dopplerCacheKey, value string, generation uint64) {
+	d.cacheMu.Lock()
+	defer d.cacheMu.Unlock()
+	if d.generation != generation {
+		return
+	}
+	d.cache[key] = dopplerCacheEntry{
+		value:      value,
+		fetchedAt:  time.Now(),
+		generation: generation,
+	}
+}
+
+func (d *DopplerProvider) secretsDownloadURL(project, configName string, names []string) (string, error) {
+	endpoint, err := url.JoinPath(d.config.APIBaseURL, dopplerAPIVersion, "configs", "config", "secrets", "download")
 	if err != nil {
-		return nil, fmt.Errorf("invalid Doppler API URL: %w", err)
+		return "", fmt.Errorf("invalid Doppler API URL: %w", err)
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("invalid Doppler API URL: %w", err)
 	}
 
-	query := endpoint.Query()
+	query := parsed.Query()
 	query.Set("format", "json")
 	if project != "" {
 		query.Set("project", project)
@@ -286,41 +435,167 @@ func (d *DopplerProvider) downloadSecrets(ctx context.Context, project, configNa
 	if configName != "" {
 		query.Set("config", configName)
 	}
-	endpoint.RawQuery = query.Encode()
+	if len(names) > 0 {
+		sorted := append([]string(nil), names...)
+		slices.Sort(sorted)
+		query.Set("secrets", strings.Join(sorted, ","))
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+func (d *DopplerProvider) downloadSecrets(ctx context.Context, project, configName string, names []string) (map[string]string, error) {
+	endpoint, err := d.secretsDownloadURL(project, configName, names)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Doppler request: %w", err)
+		return nil, err
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < dopplerMaxAttempts; attempt++ {
+		secretsMap, retryAfter, retry, err := d.downloadSecretsOnce(ctx, endpoint)
+		if err == nil {
+			return secretsMap, nil
+		}
+		lastErr = err
+		if !retry || attempt == dopplerMaxAttempts-1 {
+			return nil, err
+		}
+		delay := dopplerJitter(attempt)
+		if retryAfter != nil {
+			delay = *retryAfter
+		}
+		if err := sleepContext(ctx, delay); err != nil {
+			return nil, err
+		}
+	}
+	return nil, lastErr
+}
+
+func dopplerJitter(attempt int) time.Duration {
+	shift := attempt
+	if shift > 4 {
+		shift = 4
+	}
+	ceiling := dopplerRetryBase << shift
+	if ceiling < dopplerRetryBase {
+		ceiling = dopplerRetryBase
+	}
+	return time.Duration(rand.Int64N(int64(ceiling) + 1))
+}
+
+func sleepContext(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (d *DopplerProvider) downloadSecretsOnce(ctx context.Context, endpoint string) (map[string]string, *time.Duration, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("failed to create Doppler request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+d.config.Token)
 	req.Header.Set("Accept", "application/json")
 
-	// URL is validated at Initialize from plugin admin config (http/https + host only).
+	// URL is validated at Initialize: https, or http only for a loopback host.
 	resp, err := d.httpClient.Do(req) // #nosec G704
 	if err != nil {
-		return nil, fmt.Errorf("failed to call Doppler API: %w", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDopplerResponseBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read Doppler response: %w", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, nil, false, fmt.Errorf("failed to call Doppler API: %w", err)
+		}
+		return nil, nil, true, fmt.Errorf("failed to call Doppler API: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("doppler API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxDopplerResponseBytes))
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return nil, nil, true, fmt.Errorf("failed to read Doppler response: %w", readErr)
 	}
 
-	var secretsMap map[string]string
-	if err := json.Unmarshal(body, &secretsMap); err != nil {
-		return nil, fmt.Errorf("failed to parse Doppler response: %w", err)
+	if resp.StatusCode == http.StatusOK {
+		var secretsMap map[string]string
+		if err := json.Unmarshal(body, &secretsMap); err != nil {
+			return nil, nil, false, fmt.Errorf("failed to parse Doppler response: %w", err)
+		}
+		return secretsMap, nil, false, nil
 	}
 
-	return secretsMap, nil
+	apiErr := &DopplerAPIError{
+		Status:    resp.StatusCode,
+		RequestID: dopplerRequestID(resp.Header),
+		Messages:  parseDopplerMessages(body),
+	}
+	retry := dopplerRetryableStatus(resp.StatusCode)
+	if !retry {
+		return nil, nil, false, apiErr
+	}
+	retryAfter, hasRetryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	if !hasRetryAfter {
+		return nil, nil, true, apiErr
+	}
+	return nil, &retryAfter, true, apiErr
 }
 
-func cloneSecretsMap(src map[string]string) map[string]string {
-	return maps.Clone(src)
+func dopplerRetryableStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func dopplerRequestID(header http.Header) string {
+	if id := strings.TrimSpace(header.Get("X-Request-Id")); id != "" {
+		return id
+	}
+	return strings.TrimSpace(header.Get("X-Doppler-Request-Id"))
+}
+
+func parseDopplerMessages(body []byte) []string {
+	var payload struct {
+		Messages []string `json:"messages"`
+		Message  string   `json:"message"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil
+	}
+	if payload.Message != "" {
+		payload.Messages = append(payload.Messages, payload.Message)
+	}
+	return payload.Messages
+}
+
+func parseRetryAfter(raw string, now time.Time) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds < 0 {
+			seconds = 0
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
+		return 0, false
+	}
+	delay := when.Sub(now)
+	if delay < 0 {
+		delay = 0
+	}
+	return delay, true
 }

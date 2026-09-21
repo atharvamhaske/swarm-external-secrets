@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -47,17 +48,23 @@ type Payload struct {
 // the onEvent callback. The plugin runs with host networking, so the listener
 // is reachable at the host's <port>.
 type Server struct {
-	server  *http.Server
-	path    string
-	secret  string
-	onEvent func(Payload)
+	server        *http.Server
+	path          string
+	secret        string
+	allowUnsigned bool
+	onEvent       func(Payload)
 }
 
 // New builds a Doppler webhook listener. onEvent is invoked asynchronously
-// after a request is authenticated and parsed.
-func New(addr, path, secret string, onEvent func(Payload)) *Server {
+// after a request is authenticated and parsed. A signing secret is required
+// unless allowUnsigned is set for local development.
+func New(addr, path, secret string, allowUnsigned bool, onEvent func(Payload)) (*Server, error) {
 	if path == "" {
 		path = defaultPath
+	}
+	secret = strings.TrimSpace(secret)
+	if secret == "" && !allowUnsigned {
+		return nil, fmt.Errorf("webhook signing secret is required")
 	}
 
 	mux := http.NewServeMux()
@@ -70,12 +77,13 @@ func New(addr, path, secret string, onEvent func(Payload)) *Server {
 			WriteTimeout:      10 * time.Second,
 			IdleTimeout:       30 * time.Second,
 		},
-		path:    path,
-		secret:  secret,
-		onEvent: onEvent,
+		path:          path,
+		secret:        secret,
+		allowUnsigned: allowUnsigned,
+		onEvent:       onEvent,
 	}
 	mux.HandleFunc(path, s.handle)
-	return s
+	return s, nil
 }
 
 // Start begins serving in the background.
@@ -142,11 +150,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 //
 // Doppler signs each delivery with HMAC-SHA256 over the raw body, keyed by the
 // configured signing secret, and sends it as "X-Doppler-Signature: sha256=<hex>".
-// When no secret is configured, verification is skipped (Doppler permits
-// unsigned webhooks); this is discouraged and warned about at startup.
+// Unsigned requests are accepted only when the listener was explicitly started
+// with allowUnsigned.
 func (s *Server) verifySignature(header string, body []byte) bool {
 	if s.secret == "" {
-		return true
+		return s.allowUnsigned
 	}
 
 	got := strings.TrimPrefix(strings.TrimSpace(header), "sha256=")
