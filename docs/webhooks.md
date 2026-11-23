@@ -42,6 +42,9 @@ Vault connection, authentication, and KV mount settings still apply. See the
 [Vault configuration reference](multi-provider.md#1-hashicorp-vault-default)
 and [JWT authentication guide](jwt.md).
 
+Provider names are case-insensitive. `hashicorp-vault` is an alias for `vault`;
+both select the same Vault webhook behavior when `USE_WEBHOOK=true`.
+
 ### Configure a local receiver
 
 Use a disposable Linux Swarm manager for this example. Vault must already be

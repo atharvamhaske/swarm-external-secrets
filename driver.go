@@ -85,6 +85,7 @@ func NewDriver() (*SecretsDriver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create provider: %v", err)
 	}
+	config.ProviderType = provider.GetProviderName()
 
 	// Initialize the provider
 	if err := provider.Initialize(settings); err != nil {

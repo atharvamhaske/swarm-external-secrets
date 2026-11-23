@@ -61,6 +61,40 @@ func TestNewDriver_WebhookFailureFallsBackToPolling(t *testing.T) {
 	}
 }
 
+func TestNewDriver_VaultAliasesUseWebhook(t *testing.T) {
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	t.Setenv("VAULT_ADDR", "http://127.0.0.1:8200")
+	t.Setenv("VAULT_AUTH_METHOD", "token")
+	t.Setenv("VAULT_TOKEN", "test-token")
+	t.Setenv("VAULT_KV_VERSION", "2")
+	t.Setenv("ENABLE_MONITORING", "false")
+	t.Setenv("ENABLE_ROTATION", "true")
+	t.Setenv("ROTATION_INTERVAL", "1h")
+	t.Setenv("USE_WEBHOOK", "true")
+	t.Setenv("WEBHOOK_SECRET", "test-webhook-secret")
+	t.Setenv("WEBHOOK_PORT", strconv.Itoa(listener.Addr().(*net.TCPAddr).Port))
+	for _, providerType := range []string{"vault", "VAULT", "hashicorp-vault", "HASHICORP-VAULT"} {
+		t.Run(providerType, func(t *testing.T) {
+			t.Setenv("SECRETS_PROVIDER", providerType)
+			driver, err := NewDriver()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = driver.Stop() }()
+			if driver.webhookServer == nil {
+				t.Fatalf("provider %q selected Vault but did not configure the webhook listener", providerType)
+			}
+			if driver.config.ProviderType != "vault" {
+				t.Fatalf("provider type = %q, want canonical name vault", driver.config.ProviderType)
+			}
+		})
+	}
+}
+
 func TestReconcileSecret_CancelsProviderRead(t *testing.T) {
 	t.Parallel()
 	started := make(chan struct{})
