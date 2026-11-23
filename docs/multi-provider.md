@@ -15,6 +15,7 @@ The Vault Swarm Plugin supports multiple secrets providers, allowing you to use 
 | `VAULT_ADDR` | Vault server address | `http://localhost:8200` |
 | `VAULT_TOKEN` | Vault token for authentication | — |
 | `VAULT_MOUNT_PATH` | Mount path for KV engine | `secret` |
+| `VAULT_KV_VERSION` | KV engine version (`1` or `2`) | `2` |
 | `VAULT_AUTH_METHOD` | Authentication method (`token`, `approle`, `jwt`) | `token` |
 | `VAULT_ROLE_ID` | Role ID for AppRole authentication | — |
 | `VAULT_SECRET_ID` | Secret ID for AppRole authentication | — |
@@ -48,6 +49,7 @@ docker plugin set swarm-external-secrets:latest \
 
 - By default, Vault KV v2 secrets are read from the `secret` mount, so tracked paths use the `secret/data/...` form.
 - If you set `VAULT_MOUNT_PATH` to a custom mount such as `kv`, `prod`, or `dev`, the plugin uses that mount consistently for secret reads and rotation tracking, for example `kv/data/...`.
+- If your engine is KV v1, set `VAULT_KV_VERSION="1"`. Paths then use the `<mount>/...` form without injecting `/data/`: the default mount reads `secret/...`, and a custom mount such as `kv` reads `kv/...`. The default remains `2`, so existing v2 setups keep working unchanged. A literal `data/` folder in the secret name is preserved for KV v1 (for example, `vault_path: secret/data/mysql` reads secret `data/mysql` under mount `secret`), since `data/` is a valid path segment in KV v1.
 
 **Example with Custom Mount Path:**
 ```bash
@@ -56,6 +58,25 @@ docker plugin set swarm-external-secrets:latest \
     VAULT_ADDR="https://vault.example.com:8200" \
     VAULT_TOKEN="hvs.example-token" \
     VAULT_MOUNT_PATH="kv"
+```
+
+**Example with KV v1:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="vault" \
+    VAULT_ADDR="https://vault.example.com:8200" \
+    VAULT_TOKEN="hvs.example-token" \
+    VAULT_KV_VERSION="1"
+```
+
+**Example with KV v1 on a custom mount:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="vault" \
+    VAULT_ADDR="https://vault.example.com:8200" \
+    VAULT_TOKEN="hvs.example-token" \
+    VAULT_MOUNT_PATH="kv" \
+    VAULT_KV_VERSION="1"
 ```
 
 ---
@@ -131,6 +152,7 @@ docker plugin set swarm-external-secrets:latest \
 | `OPENBAO_ADDR` | OpenBao server address | `http://localhost:8200` |
 | `OPENBAO_TOKEN` | OpenBao token for authentication | — |
 | `OPENBAO_MOUNT_PATH` | Mount path for KV engine | `secret` |
+| `OPENBAO_KV_VERSION` | KV engine version (`1` or `2`) | `2` |
 | `OPENBAO_AUTH_METHOD` | Authentication method (`token`, `approle`, `jwt`) | `token` |
 | `OPENBAO_ROLE_ID` | Role ID for AppRole authentication | — |
 | `OPENBAO_SECRET_ID` | Secret ID for AppRole authentication | — |
@@ -164,6 +186,7 @@ docker plugin set swarm-external-secrets:latest \
 
 - By default, OpenBao KV v2 secrets are read from the `secret` mount, so tracked paths use the `secret/data/...` form.
 - If you set `OPENBAO_MOUNT_PATH` to a custom mount such as `kv`, `prod`, or `dev`, the plugin uses that mount consistently for secret reads and rotation tracking, for example `kv/data/...`.
+- If your engine is KV v1, set `OPENBAO_KV_VERSION="1"`. Paths then use the `<mount>/...` form without injecting `/data/`: the default mount reads `secret/...`, and a custom mount such as `kv` reads `kv/...`. The default remains `2`, so existing v2 setups keep working unchanged. A literal `data/` folder in the secret name is preserved for KV v1 (for example, `openbao_path: secret/data/mysql` reads secret `data/mysql` under mount `secret`), since `data/` is a valid path segment in KV v1.
 
 **Example with Custom Mount Path:**
 ```bash
@@ -172,6 +195,25 @@ docker plugin set swarm-external-secrets:latest \
     OPENBAO_ADDR="https://openbao.example.com:8200" \
     OPENBAO_TOKEN="ob_example-token" \
     OPENBAO_MOUNT_PATH="kv"
+```
+
+**Example with KV v1:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="openbao" \
+    OPENBAO_ADDR="https://openbao.example.com:8200" \
+    OPENBAO_TOKEN="ob_example-token" \
+    OPENBAO_KV_VERSION="1"
+```
+
+**Example with KV v1 on a custom mount:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="openbao" \
+    OPENBAO_ADDR="https://openbao.example.com:8200" \
+    OPENBAO_TOKEN="ob_example-token" \
+    OPENBAO_MOUNT_PATH="kv" \
+    OPENBAO_KV_VERSION="1"
 ```
 
 ---
@@ -312,7 +354,54 @@ docker plugin set swarm-external-secrets:latest \
 
 ---
 
-### 7. GCP Secret Manager (Placeholder)
+### 7. Infisical
+
+**Provider Type:** `infisical`
+
+**Environment Variables:**
+
+| Variable | Description | Default |
+|---|---|---|
+| `INFISICAL_CLIENT_ID` | Machine identity Client ID (Universal Auth) | — |
+| `INFISICAL_CLIENT_SECRET` | Machine identity Client Secret (Universal Auth) | — |
+| `INFISICAL_TOKEN` | Pre-issued bearer/access token (optional if Universal Auth is set) | — |
+| `INFISICAL_PROJECT_ID` | Infisical project ID (required) | — |
+| `INFISICAL_ENVIRONMENT` | Environment slug (`dev`, `staging`, `prod`, …) | `dev` |
+| `INFISICAL_SECRET_PATH` | Default folder path for secrets | `/` |
+| `INFISICAL_SITE_URL` | Infisical site/API base URL | `https://app.infisical.com` |
+
+**Authentication:**
+
+- **Universal Auth (production):** set `INFISICAL_CLIENT_ID` + `INFISICAL_CLIENT_SECRET` for a machine identity.
+- **Access token:** set `INFISICAL_TOKEN` to a pre-issued Infisical bearer token (useful for short-lived testing).
+
+**Example (Universal Auth):**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="infisical" \
+    INFISICAL_CLIENT_ID="..." \
+    INFISICAL_CLIENT_SECRET="..." \
+    INFISICAL_PROJECT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" \
+    INFISICAL_ENVIRONMENT="prod" \
+    ENABLE_ROTATION="true" \
+    ROTATION_INTERVAL="30s"
+```
+
+**Secret Labels:**
+
+- `infisical_secret_name` — Infisical secret key (e.g. `MYSQL_PASSWORD`)
+- `infisical_field` — Optional JSON field to extract from the secret value (defaults to `value`)
+- `infisical_project_id` — Optional per-secret project override
+- `infisical_environment` — Optional per-secret environment override
+- `infisical_secret_path` — Optional per-secret folder path override
+
+If `infisical_secret_name` is omitted, the Docker secret name is uppercased (`mysql_password` → `MYSQL_PASSWORD`).
+
+See [`docs/infisical.md`](./infisical.md) for machine-identity setup and usage details.
+
+---
+
+### 8. GCP Secret Manager (Placeholder)
 
 **Provider Type:** `gcp`
 
@@ -420,6 +509,19 @@ secrets:
 ```
 
 For multiple Doppler configs, run separate plugin instances with different service tokens (one token per project+config), similar to the Vault + OpenBao pattern above.
+
+### Infisical
+
+```yaml
+secrets:
+  mysql_password:
+    driver: swarm-external-secrets:latest
+    labels:
+      infisical_secret_name: "MYSQL_PASSWORD"
+      # infisical_secret_path: "/database"
+```
+
+One plugin instance can target multiple Infisical projects and environments using per-secret `infisical_project_id` and `infisical_environment` labels, provided its credentials can access those contexts. Use separate plugin instances only when credentials, isolation requirements, or fixed configuration must differ.
 
 
 ## Multiple Providers in the Same Swarm Cluster
@@ -535,6 +637,12 @@ secrets:
 - Downloads are cached (default 30s). A rotation cycle and a webhook each drop that cache before reading, so a long TTL does not hide a changed secret. Network errors, 429s, and retryable 5xx responses are retried with jitter, honoring `Retry-After`.
 - Optional webhook listener enables event-driven rotation, verified via the `X-Doppler-Signature` HMAC-SHA256 header. The listener does not start without `DOPPLER_WEBHOOK_SECRET` unless `DOPPLER_WEBHOOK_INSECURE=true`.
 - Secret names default to the uppercased Docker secret name when `doppler_secret_name` is not set
+
+### Infisical
+- Uses the official Infisical Go SDK with Universal Auth or a bearer token
+- The SDK refreshes Universal Auth tokens; `INFISICAL_TOKEN` is used as-is
+- Supports per-secret overrides for project, environment, and folder path
+- Secret names default to the uppercased Docker secret name when `infisical_secret_name` is not set
 
 ### GCP Secret Manager
 - Currently a placeholder — will error on initialization

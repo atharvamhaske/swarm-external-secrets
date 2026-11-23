@@ -1,6 +1,6 @@
 site_name: Swarm External Secrets
-site_url: https://sugar-org.github.io/swarm-external-secrets
-repo_url: https://github.com/sugar-org/swarm-external-secrets
+site_url: https://sciops-org.github.io/swarm-external-secrets
+repo_url: https://github.com/sciops-org/swarm-external-secrets
 docs_dir: ./docs
 site_dir: ./site
 
@@ -59,6 +59,7 @@ markdown_extensions:
 nav:
   - index.md
   - Providers:
+      - Infisical: infisical.md
       - GCP Secret Manager: gcp.md
       - Vault and OpenBao JWT: jwt.md
   - Multi-Provider: multi-provider.md

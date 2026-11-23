@@ -22,6 +22,8 @@ func CreateProvider(providerType string) (SecretsProvider, error) {
 		return &OCIProvider{}, nil
 	case "doppler":
 		return &DopplerProvider{}, nil
+	case "infisical":
+		return &InfisicalProvider{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}
@@ -37,6 +39,7 @@ func GetSupportedProviders() []string {
 		"openbao",
 		"oci",
 		"doppler",
+		"infisical",
 	}
 }
 
@@ -86,6 +89,12 @@ func GetProviderInfo(providerType string) (map[string]string, error) {
 		info["description"] = "Doppler secrets management platform"
 		info["auth_methods"] = "service token, CLI token"
 		info["env_vars"] = "DOPPLER_TOKEN, DOPPLER_PROJECT, DOPPLER_CONFIG, DOPPLER_API_URL, DOPPLER_CACHE_TTL, DOPPLER_WEBHOOK_SECRET, DOPPLER_WEBHOOK_INSECURE"
+
+	case "infisical":
+		info["name"] = "Infisical"
+		info["description"] = "Infisical secrets management platform"
+		info["auth_methods"] = "universal auth (machine identity), access token"
+		info["env_vars"] = "INFISICAL_TOKEN, INFISICAL_CLIENT_ID, INFISICAL_CLIENT_SECRET, INFISICAL_PROJECT_ID, INFISICAL_ENVIRONMENT, INFISICAL_SECRET_PATH, INFISICAL_SITE_URL"
 
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)

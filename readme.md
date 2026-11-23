@@ -1,10 +1,10 @@
 ### Swarm External Secrets
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sugar-org/swarm-external-secrets/badge)](https://scorecard.dev/viewer/?uri=github.com/sugar-org/swarm-external-secrets) ![Discord](https://img.shields.io/discord/1476983394977054740?logo=discord&color=blue) [![Join our Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/4NYdBu7bZy) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sugar-org/swarm-external-secrets)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sciops-org/swarm-external-secrets/badge)](https://scorecard.dev/viewer/?uri=github.com/sciops-org/swarm-external-secrets) ![Discord](https://img.shields.io/discord/1476983394977054740?logo=discord&color=blue) [![Join our Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/4NYdBu7bZy) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sciops-org/swarm-external-secrets)
 
 ---
 
 
-A Docker Swarm secrets plugin that integrates with multiple secret management providers including HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, OpenBao, OCI Vault, and Doppler.
+A Docker Swarm secrets plugin that integrates with multiple secret management providers including HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, OpenBao, OCI Vault, Infisical, and Doppler.
 
 ### 🚀 Updates
 
@@ -17,19 +17,19 @@ For more information, check out [GSoC Contribution Guidelines](./CONTRIBUTING.md
 
 ### Architecture 
 
-![Architecture](https://raw.githubusercontent.com/sugar-org/swarm-external-secrets/refs/heads/main/docs/architecture.png)
+![Architecture](https://raw.githubusercontent.com/sciops-org/swarm-external-secrets/refs/heads/main/docs/architecture.png)
 
 
 ## Documentation
 
-Please refer to the [docs](https://sugar-org.github.io/swarm-external-secrets/) for more information. JWT login and Vault/OpenBao client-token renewal are in `docs/jwt.md`.
+Please refer to the [docs](https://sciops-org.github.io/swarm-external-secrets/) for more information. JWT login and Vault/OpenBao client-token renewal are in `docs/jwt.md`.
 
 ## Supported Providers
 
 ## Features
 
-- **Multi-Provider Support**: HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, OpenBao, OCI Vault, Doppler
-- **Multiple Auth Methods**: Token, AppRole, and JWT for Vault and OpenBao, including client-token renewal
+- **Multi-Provider Support**: HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, OpenBao, OCI Vault, Infisical, Doppler
+- **Multiple Auth Methods**: Support for various authentication methods per provider
 - **Automatic Secret Rotation**: Monitor providers for changes and automatically update Docker secrets and services
 - **Real-time Monitoring**: Web dashboard with system metrics, health status, and performance tracking
 - **Flexible Path Mapping**: Customize secret paths and field extraction per provider
@@ -58,6 +58,9 @@ docker plugin set swarm-external-secrets:latest SECRETS_PROVIDER="oci"
 
 # Doppler
 docker plugin set swarm-external-secrets:latest SECRETS_PROVIDER="doppler"
+
+# Infisical
+docker plugin set swarm-external-secrets:latest SECRETS_PROVIDER="infisical"
 ```
 
 For multi-instance usage (for example, Vault + OpenBao with separate plugin names in Swarm), see [`docs/multi-provider.md`](./docs/multi-provider.md).
@@ -177,6 +180,7 @@ docker plugin set swarm-external-secrets:latest \
 | OpenBao | ✅ Stable | Token, AppRole, JWT | ✅ |
 | OCI Vault | 🚧 Beta | API Key, Instance Principal | ✅ |
 | Doppler | 🚧 Beta | Service Token, CLI Token | ✅ |
+| Infisical | ✅ Stable | Universal Auth, Access Token | ✅ |
 | GCP Secret Manager | 🚧 Placeholder | - | - |
 
 ## Quick Start Examples
@@ -223,8 +227,8 @@ docker plugin set swarm-external-secrets:latest \
 
 ### License
 
-[BSD-3-Clause license](https://github.com/sugar-org/swarm-external-secrets/blob/main/LICENSE)
+[BSD-3-Clause license](https://github.com/sciops-org/swarm-external-secrets/blob/main/LICENSE)
 
 ## Explore the Repository
 
-If you want to explore the repository or read more, check out [Ask DeepWiki](https://deepwiki.com/sugar-org/swarm-external-secrets).
+If you want to explore the repository or read more, check out [Ask DeepWiki](https://deepwiki.com/sciops-org/swarm-external-secrets).

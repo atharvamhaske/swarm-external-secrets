@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat/jwtsource"
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat/vclient"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat/jwtsource"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat/vclient"
 )
 
 type mockClient struct {

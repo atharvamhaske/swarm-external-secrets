@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
 )
 
 // GCPProvider implements the SecretsProvider interface for GCP Secret Manager
@@ -61,9 +61,9 @@ func (g *GCPProvider) Initialize(config map[string]string) error {
 			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		)
 	case g.config.CredentialsJSON != "":
-		client, err = secretmanager.NewClient(ctx, option.WithCredentialsJSON([]byte(g.config.CredentialsJSON)))
+		client, err = secretmanager.NewClient(ctx, option.WithAuthCredentialsJSON(option.ServiceAccount, []byte(g.config.CredentialsJSON)))
 	case g.config.CredentialsPath != "":
-		client, err = secretmanager.NewClient(ctx, option.WithCredentialsFile(g.config.CredentialsPath))
+		client, err = secretmanager.NewClient(ctx, option.WithAuthCredentialsFile(option.ServiceAccount, g.config.CredentialsPath))
 	default:
 		// Fallback to Application Default Credentials (ADC)
 		client, err = secretmanager.NewClient(ctx)
