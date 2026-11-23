@@ -28,6 +28,15 @@ credentials in the SDK's in-memory cache.
 
 ## High-level architecture
 
+[![SPIRE supplies JWT-SVIDs to the plugin, which exchanges them with AWS STS and retrieves Secrets Manager values for Swarm services](assets/aws-spiffe/architecture.png)](assets/aws-spiffe/architecture.png)
+
+Architecture overview from [PR #177](https://github.com/sciops-org/swarm-external-secrets/pull/177).
+Select the image to view it at full size. Docker Engine mediates the service
+requests and secret mounts shown in the overview.
+
+The component diagram below includes Docker Engine and the OIDC discovery
+endpoints in more detail:
+
 ```mermaid
 flowchart LR
   subgraph node["Docker Swarm node"]
