@@ -1,4 +1,4 @@
-package dopplerwebhook
+package doppler
 
 import (
 	"crypto/hmac"

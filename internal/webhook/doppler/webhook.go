@@ -1,8 +1,8 @@
-// Package dopplerwebhook implements the HTTP listener that receives Doppler
+// Package doppler implements the HTTP listener that receives Doppler
 // webhook deliveries and triggers an immediate rotation check, bypassing the
 // poll interval. It understands Doppler's payload and request-signing scheme
 // (HMAC-SHA256 via the X-Doppler-Signature header).
-package dopplerwebhook
+package doppler
 
 import (
 	"context"

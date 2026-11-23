@@ -18,9 +18,9 @@ import (
 	"github.com/docker/go-plugins-helpers/secrets"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/sciops-org/swarm-external-secrets/dopplerwebhook"
 	"github.com/sciops-org/swarm-external-secrets/internal/secrettransform"
 	"github.com/sciops-org/swarm-external-secrets/internal/utils"
+	dopplerwebhook "github.com/sciops-org/swarm-external-secrets/internal/webhook/doppler"
 	vaultwebhook "github.com/sciops-org/swarm-external-secrets/internal/webhook/vault"
 	"github.com/sciops-org/swarm-external-secrets/monitoring"
 	"github.com/sciops-org/swarm-external-secrets/providers"
