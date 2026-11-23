@@ -224,6 +224,10 @@ func (a *AWSProvider) loadAWSConfig(ctx context.Context) (aws.Config, error) {
 	if a.config.Profile != "" {
 		opts = append(opts, config.WithSharedConfigProfile(a.config.Profile))
 	}
+	if a.config.AuthMethod == awsAuthMethodSPIFFE {
+		// Skip ambient credential resolution before installing the SPIFFE cache.
+		opts = append(opts, config.WithCredentialsProvider(aws.AnonymousCredentials{}))
+	}
 
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {

@@ -109,6 +109,9 @@ func (t *AWSKMSTransformer) loadAWSConfig(ctx context.Context) (aws.Config, erro
 	if profile := setting(t.settings, "AWS_PROFILE"); profile != "" {
 		opts = append(opts, config.WithSharedConfigProfile(profile))
 	}
+	if t.credentials != nil {
+		opts = append(opts, config.WithCredentialsProvider(t.credentials))
+	}
 
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
@@ -116,7 +119,6 @@ func (t *AWSKMSTransformer) loadAWSConfig(ctx context.Context) (aws.Config, erro
 	}
 
 	if t.credentials != nil {
-		cfg.Credentials = t.credentials
 		return cfg, nil
 	}
 

@@ -62,6 +62,24 @@ func TestNew_Validation(t *testing.T) {
 			wantErr:    "must use unix:///absolute/path form with no host",
 		},
 		{
+			name:       "socket URL with query values",
+			socketAddr: "unix:///run/spire/agent-sockets/api.sock?key=value",
+			audience:   "swarm-external-secrets",
+			wantErr:    "must not include query values",
+		},
+		{
+			name:       "socket URL with fragment",
+			socketAddr: "unix:///run/spire/agent-sockets/api.sock#fragment",
+			audience:   "swarm-external-secrets",
+			wantErr:    "must not include a fragment",
+		},
+		{
+			name:       "socket URL with user information",
+			socketAddr: "unix://user@/run/spire/agent-sockets/api.sock",
+			audience:   "swarm-external-secrets",
+			wantErr:    "must not include user info",
+		},
+		{
 			name:       "missing audience",
 			socketAddr: "unix:///run/spire/agent-sockets/api.sock",
 			wantErr:    "JWT-SVID audience is required",

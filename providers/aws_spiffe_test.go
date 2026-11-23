@@ -3,6 +3,8 @@ package providers
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -119,4 +121,39 @@ func TestSPIFFECredentialsProviderDefaultRefreshTimeout(t *testing.T) {
 		}),
 	}
 	_, _ = provider.Retrieve(context.Background())
+}
+
+func TestAWSProviderInitializeSPIFFEIgnoresAmbientWebIdentity(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+		"AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_ROLE_ARN",
+	} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("AWS_CONFIG_FILE", empty)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", empty)
+	t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", filepath.Join(t.TempDir(), "ambient-token"))
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+	provider := &AWSProvider{}
+	t.Cleanup(func() {
+		if err := provider.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	if err := provider.Initialize(map[string]string{
+		"AWS_REGION":             "us-east-1",
+		"AWS_AUTH_METHOD":        "spiffe",
+		"AWS_ROLE_ARN":           "arn:aws:iam::123456789012:role/test",
+		"SPIFFE_ENDPOINT_SOCKET": "unix:///run/spire/agent-sockets/api.sock",
+	}); err != nil {
+		t.Fatalf("Initialize() with explicit SPIFFE config error = %v", err)
+	}
+	if provider.SPIFFECredentials() == nil {
+		t.Fatal("Initialize() did not install SPIFFE credentials")
+	}
 }

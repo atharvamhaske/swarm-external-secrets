@@ -95,7 +95,7 @@ sequenceDiagram
 
   alt Temporary AWS credentials are cached
     SDK->>SM: GetSecretValue(ctx, cached credentials)
-  else Cache empty or credentials near expiry
+  else Cache empty or credentials expired
     SDK->>Source: FetchIdentityToken(ctx)
     Source->>Agent: Fetch JWT-SVID over host Unix socket
     Agent->>Server: Request JWT-SVID for attested workload
@@ -278,12 +278,12 @@ The endpoint overrides are intended for tests and compatible AWS emulators.
 
 Initialization is lazy: the plugin can start while the SPIRE Agent is
 temporarily unavailable. The first AWS request returns an error if the Workload
-API cannot be reached, and a later request retries. Each token fetch has a
-30-second timeout.
+API cannot be reached, and a later request retries. Each credential refresh,
+including JWT retrieval and the STS exchange, has a 30-second timeout.
 
 JWT-SVIDs are fetched only for STS exchanges. The AWS SDK caches the resulting
-temporary credentials and refreshes them near expiry, so the secret rotation
-loop does not call SPIRE or STS on every check.
+temporary credentials and refreshes them on the next request after expiration,
+so the secret rotation loop does not call SPIRE or STS on every check.
 
 ## Verification
 

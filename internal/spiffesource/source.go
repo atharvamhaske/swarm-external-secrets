@@ -147,5 +147,8 @@ func validateSocketAddr(socketAddr string) error {
 	if endpoint.Host != "" {
 		return fmt.Errorf("SPIFFE_ENDPOINT_SOCKET %q must use unix:///absolute/path form with no host", socketAddr)
 	}
+	if err := workloadapi.ValidateAddress(socketAddr); err != nil {
+		return fmt.Errorf("invalid SPIFFE_ENDPOINT_SOCKET: %w", err)
+	}
 	return nil
 }
