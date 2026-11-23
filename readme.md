@@ -198,7 +198,7 @@ docker plugin set swarm-external-secrets:latest \
 | Provider | Status | Authentication | Rotation |
 |----------|--------|---------------|----------|
 | HashiCorp Vault | ✅ Stable | Token, AppRole, JWT | ✅ |
-| AWS Secrets Manager | ✅ Stable | IAM, Access Keys | ✅ |
+| AWS Secrets Manager | ✅ Stable | IAM, Access Keys, SPIFFE/OIDC | ✅ |
 | Azure Key Vault | ✅ Stable | Service Principal, Access Token | ✅ |
 | OpenBao | ✅ Stable | Token, AppRole, JWT | ✅ |
 | OCI Vault | 🚧 Beta | API Key, Instance Principal | ✅ |
@@ -220,8 +220,12 @@ docker plugin set swarm-external-secrets:latest \
 docker plugin set swarm-external-secrets:latest \
     SECRETS_PROVIDER="aws" \
     AWS_REGION="us-west-2" \
-    AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+    AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE" \
+    AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ```
+
+For secretless AWS authentication with a node-level SPIRE Agent, see the
+[SPIFFE/OIDC guide](https://github.com/sciops-org/swarm-external-secrets/blob/main/docs/aws-spiffe.md).
 
 ### Azure Key Vault
 ```bash
