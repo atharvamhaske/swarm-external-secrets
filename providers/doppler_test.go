@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -417,11 +418,19 @@ func TestDopplerProviderInvalidateCacheDropsInFlightResponse(t *testing.T) {
 
 	select {
 	case <-invalidateDone:
-		t.Fatal("InvalidateCache returned while the download was still in flight")
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("InvalidateCache waited for the in-flight download")
 	}
 
+	// A post-invalidation lookup must not join the older in-flight request.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	got, err := provider.GetSecret(ctx, info)
 	close(release)
+	if err != nil || string(got) != "new" {
+		t.Fatalf("GetSecret() after invalidation = %q, %v; want new", got, err)
+	}
 
 	select {
 	case err := <-errCh:
@@ -576,4 +585,155 @@ func TestParseRetryAfter(t *testing.T) {
 	if _, ok = parseRetryAfter("", now); ok {
 		t.Fatal("empty Retry-After was accepted")
 	}
+}
+
+// Each handler waits for every independent request to arrive before responding.
+// A provider-wide lock cannot complete even the first request.
+func TestDopplerProviderUnrelatedDownloadsConcurrent(t *testing.T) {
+	t.Parallel()
+	const count = 10
+	arrived := make(chan struct{}, count)
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	provider := setupDopplerHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		name := r.URL.Query().Get("secrets")
+		_ = json.NewEncoder(w).Encode(map[string]string{name: "value"})
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	results := make(chan error, count)
+	for i := range count {
+		go func() {
+			value, err := provider.getSecretValue(ctx, "project", "dev", fmt.Sprintf("SECRET_%d", i))
+			if err == nil && value != "value" {
+				err = fmt.Errorf("value = %q, want value", value)
+			}
+			results <- err
+		}()
+	}
+	for range count {
+		select {
+		case <-arrived:
+		case <-ctx.Done():
+			t.Fatal("unrelated downloads did not reach the server concurrently")
+		}
+	}
+	once.Do(func() { close(release) })
+	for range count {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestDopplerProviderCoalescesDownloadsAndCancelsWaiters(t *testing.T) {
+	t.Parallel()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(release) })
+	var calls atomic.Int32
+	provider := setupDopplerHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"SHARED": "value"})
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	leader := make(chan error, 1)
+	go func() {
+		_, err := provider.getSecretValue(ctx, "project", "dev", "SHARED")
+		leader <- err
+	}()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("leader download did not start")
+	}
+	waiterCtx, cancelWaiter := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancelWaiter()
+	_, err := provider.getSecretValue(waiterCtx, "project", "dev", "SHARED")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waiting caller error = %v, want deadline exceeded", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("API calls = %d, want one shared download", got)
+	}
+	once.Do(func() { close(release) })
+	if err := <-leader; err != nil {
+		t.Fatalf("waiter cancellation affected leader: %v", err)
+	}
+}
+
+func TestDopplerProviderRetriesCanceledLeader(t *testing.T) {
+	t.Parallel()
+	started := make(chan struct{})
+	var calls atomic.Int32
+	provider := setupDopplerHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-r.Context().Done()
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"SHARED": "value"})
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	leaderCtx, cancelLeader := context.WithCancel(ctx)
+	defer cancelLeader()
+	leader := make(chan error, 1)
+	go func() {
+		_, err := provider.getSecretValue(leaderCtx, "project", "dev", "SHARED")
+		leader <- err
+	}()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("leader download did not start")
+	}
+	follower := make(chan error, 1)
+	go func() {
+		value, err := provider.getSecretValue(ctx, "project", "dev", "SHARED")
+		if err == nil && value != "value" {
+			err = fmt.Errorf("value = %q, want value", value)
+		}
+		follower <- err
+	}()
+	cancelLeader()
+	if err := <-leader; !errors.Is(err, context.Canceled) {
+		t.Fatalf("leader error = %v, want canceled", err)
+	}
+	if err := <-follower; err != nil {
+		t.Fatalf("follower inherited canceled leader: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("API calls = %d, want two", got)
+	}
+}
+
+func setupDopplerHandler(t *testing.T, handler http.HandlerFunc) *DopplerProvider {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	provider := &DopplerProvider{}
+	if err := provider.Initialize(map[string]string{
+		"DOPPLER_TOKEN":   "dp.st.test",
+		"DOPPLER_API_URL": server.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return provider
 }

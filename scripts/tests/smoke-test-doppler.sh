@@ -33,11 +33,13 @@ SECRET_VALUE="doppler-smoke-pass-v1-${RUN_ID}"
 SECRET_VALUE_ROTATED="doppler-smoke-pass-v2-${RUN_ID}"
 
 MOCK_SERVER_PID=""
-EXIT_CODE=0
 
 doppler_init_backend
 
 cleanup() {
+    local exit_code=$?
+    trap - EXIT
+    set +e
     echo -e "${RED}Running Doppler smoke test cleanup...${DEF}"
     remove_stack "${STACK_NAME}"
     docker secret rm "${SECRET_NAME}" 2>/dev/null || true
@@ -48,7 +50,7 @@ cleanup() {
     fi
     rm -f "${COMPOSE_FILE}"
     remove_plugin
-    exit "${EXIT_CODE}"
+    exit "${exit_code}"
 }
 trap cleanup EXIT
 

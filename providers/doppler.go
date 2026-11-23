@@ -46,8 +46,9 @@ type DopplerProvider struct {
 	cache      map[dopplerCacheKey]dopplerCacheEntry
 	cacheMu    sync.RWMutex
 	fetchMu    sync.Mutex
-	// generation invalidates in-flight downloads. It is bumped only while
-	// fetchMu is held, and a response is stored only when it still matches.
+	inflight   map[dopplerFetchKey]*dopplerFetch
+	// generation is protected by cacheMu. Responses from an earlier
+	// generation cannot refill the cache after invalidation.
 	generation uint64
 }
 
@@ -82,6 +83,17 @@ type dopplerCacheKey struct {
 	project string
 	config  string
 	secret  string
+}
+
+type dopplerFetchKey struct {
+	dopplerCacheKey
+	generation uint64
+}
+
+type dopplerFetch struct {
+	done  chan struct{}
+	value string
+	err   error
 }
 
 type dopplerCacheEntry struct {
@@ -125,6 +137,7 @@ func (d *DopplerProvider) Initialize(config map[string]string) error {
 	}
 	d.httpClient = &http.Client{Timeout: 30 * time.Second}
 	d.cache = make(map[dopplerCacheKey]dopplerCacheEntry)
+	d.inflight = make(map[dopplerFetchKey]*dopplerFetch)
 
 	if !isDopplerServiceToken(d.config.Token) {
 		if d.config.Project == "" || d.config.Config == "" {
@@ -195,13 +208,10 @@ type ReconciliationPreparer interface {
 	PrepareReconciliation(ctx context.Context, infos []*SecretInfo) error
 }
 
-// InvalidateCache drops cached Doppler downloads. It takes fetchMu before
-// cacheMu, same as the fetch path, and bumps generation so a response that
-// started earlier cannot be stored afterward.
+// InvalidateCache drops cached Doppler downloads without waiting for network
+// requests. Bumping generation prevents older responses from refilling it.
 func (d *DopplerProvider) InvalidateCache() {
-	d.fetchMu.Lock()
-	defer d.fetchMu.Unlock()
-	d.invalidateLocked()
+	d.invalidateCache()
 }
 
 // PrepareReconciliation drops the cache and downloads the named secrets once
@@ -209,9 +219,7 @@ func (d *DopplerProvider) InvalidateCache() {
 func (d *DopplerProvider) PrepareReconciliation(ctx context.Context, infos []*SecretInfo) error {
 	groups := d.groupSecretInfos(infos)
 
-	d.fetchMu.Lock()
-	defer d.fetchMu.Unlock()
-	generation := d.invalidateLocked()
+	generation := d.invalidateCache()
 
 	var joined error
 	for key, names := range groups {
@@ -360,27 +368,57 @@ func (d *DopplerProvider) getSecretValue(ctx context.Context, project, configNam
 		return value, nil
 	}
 
-	d.fetchMu.Lock()
-	defer d.fetchMu.Unlock()
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		d.fetchMu.Lock()
+		if value, ok := d.cachedValue(key); ok {
+			d.fetchMu.Unlock()
+			return value, nil
+		}
+		fetchKey := dopplerFetchKey{dopplerCacheKey: key, generation: d.generationSnapshot()}
+		if pending, ok := d.inflight[fetchKey]; ok {
+			d.fetchMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-pending.done:
+				// A canceled leader must not cancel other callers' lookups.
+				if errors.Is(pending.err, context.Canceled) || errors.Is(pending.err, context.DeadlineExceeded) {
+					continue
+				}
+				return pending.value, pending.err
+			}
+		}
+		pending := &dopplerFetch{done: make(chan struct{})}
+		d.inflight[fetchKey] = pending
+		d.fetchMu.Unlock()
 
-	if value, ok := d.cachedValue(key); ok {
-		return value, nil
+		value, err := d.fetchSecretValue(ctx, key, fetchKey.generation)
+		d.fetchMu.Lock()
+		pending.value, pending.err = value, err
+		delete(d.inflight, fetchKey)
+		close(pending.done)
+		d.fetchMu.Unlock()
+		return value, err
 	}
-	generation := d.generationSnapshot()
+}
 
-	secretsMap, err := d.downloadSecrets(ctx, project, configName, []string{secretName})
+func (d *DopplerProvider) fetchSecretValue(ctx context.Context, key dopplerCacheKey, generation uint64) (string, error) {
+	secretsMap, err := d.downloadSecrets(ctx, key.project, key.config, []string{key.secret})
 	if err != nil {
 		return "", err
 	}
-	value, ok := secretsMap[secretName]
+	value, ok := secretsMap[key.secret]
 	if !ok {
-		return "", fmt.Errorf("secret %q not found in Doppler config", secretName)
+		return "", fmt.Errorf("secret %q not found in Doppler config", key.secret)
 	}
 	d.store(key, value, generation)
 	return value, nil
 }
 
-func (d *DopplerProvider) invalidateLocked() uint64 {
+func (d *DopplerProvider) invalidateCache() uint64 {
 	d.cacheMu.Lock()
 	defer d.cacheMu.Unlock()
 	d.generation++
