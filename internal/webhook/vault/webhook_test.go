@@ -1,4 +1,4 @@
-package providers
+package vault
 
 import (
 	"context"
@@ -19,7 +19,7 @@ func TestWebhookServer_StopCancelsReconciliation(t *testing.T) {
 	t.Parallel()
 	started := make(chan struct{})
 	finished := make(chan struct{})
-	ws := NewWebhookServer(&WebhookConfig{}, func(ctx context.Context, name string) error {
+	ws := NewServer(&Config{}, func(ctx context.Context, name string) error {
 		defer close(finished)
 		close(started)
 		<-ctx.Done()
@@ -79,7 +79,7 @@ func TestWebhookServer_Authentication(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ws := NewWebhookServer(&WebhookConfig{WebhookSecret: tt.secret}, nil)
+			ws := NewServer(&Config{WebhookSecret: tt.secret}, nil)
 			t.Cleanup(func() { _ = ws.Stop() })
 			req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body))
 			req.Header.Set("X-HCP-Webhook-Signature", tt.signature)
@@ -94,7 +94,7 @@ func TestWebhookServer_Authentication(t *testing.T) {
 
 func TestWebhookServer_RejectsOversizedBody(t *testing.T) {
 	t.Parallel()
-	ws := NewWebhookServer(&WebhookConfig{}, nil)
+	ws := NewServer(&Config{}, nil)
 	t.Cleanup(func() { _ = ws.Stop() })
 	recorder := httptest.NewRecorder()
 	ws.server.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/webhook",
@@ -106,7 +106,7 @@ func TestWebhookServer_RejectsOversizedBody(t *testing.T) {
 
 func TestWebhookServer_StopCancelsBeforeDrainingHTTP(t *testing.T) {
 	t.Parallel()
-	ws := NewWebhookServer(&WebhookConfig{}, nil)
+	ws := NewServer(&Config{}, nil)
 	t.Cleanup(func() { _ = ws.Stop() })
 	started := make(chan struct{})
 	ws.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +150,7 @@ func TestWebhookServer_RejectsOverlappingReconciliation(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var calls atomic.Int32
-	ws := NewWebhookServer(&WebhookConfig{}, func(ctx context.Context, name string) error {
+	ws := NewServer(&Config{}, func(ctx context.Context, name string) error {
 		if calls.Add(1) == 1 {
 			close(started)
 		}
@@ -188,7 +188,7 @@ func TestWebhookServer_RejectsOverlappingReconciliation(t *testing.T) {
 
 func TestWebhookServer_ReturnsReconciliationFailure(t *testing.T) {
 	t.Parallel()
-	ws := NewWebhookServer(&WebhookConfig{}, func(ctx context.Context, name string) error {
+	ws := NewServer(&Config{}, func(ctx context.Context, name string) error {
 		return errors.New("provider unavailable")
 	})
 	t.Cleanup(func() { _ = ws.Stop() })
@@ -203,7 +203,7 @@ func TestWebhookServer_ReturnsReconciliationFailure(t *testing.T) {
 func TestWebhookServer_CancelsWithRequest(t *testing.T) {
 	t.Parallel()
 	started := make(chan struct{})
-	ws := NewWebhookServer(&WebhookConfig{}, func(ctx context.Context, name string) error {
+	ws := NewServer(&Config{}, func(ctx context.Context, name string) error {
 		close(started)
 		<-ctx.Done()
 		return ctx.Err()

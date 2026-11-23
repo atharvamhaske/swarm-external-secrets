@@ -181,6 +181,24 @@ polling fallback during this test. The test does not configure a native Vault
 notification subscription or validate HCP event delivery and signature
 compatibility. The OpenBao smoke test continues to use polling.
 
+## Implementation layout
+
+The Vault-specific receiver and its tests live together in an internal package:
+
+```text
+internal/webhook/vault/
+  doc.go
+  webhook.go
+  webhook_test.go
+```
+
+The driver imports this package as `vaultwebhook`, constructs its `Server` with
+a `Config`, and supplies the reconciliation callback. Secret backend
+authentication and reads remain in `providers`. Existing
+`providers.WebhookServer`, configuration and payload types, and
+`providers.NewWebhookServer` remain available through type aliases and a thin
+constructor in `providers/webhook_compat.go`.
+
 ## Troubleshooting
 
 - **No listener:** check `ENABLE_ROTATION=true`, `USE_WEBHOOK=true`, and

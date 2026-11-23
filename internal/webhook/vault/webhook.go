@@ -1,4 +1,4 @@
-package providers
+package vault
 
 import (
 	"context"
@@ -27,24 +27,24 @@ const (
 	webhookReconcileTimeout = 2 * time.Minute
 )
 
-// WebhookPayload is the HCP-style JSON envelope accepted by the listener.
+// Payload is the HCP-style JSON envelope accepted by the listener.
 // EventAction, EventSource, and EventPayload.Name control reconciliation;
 // other metadata does not select a Vault namespace or application. Unknown
 // JSON fields are ignored. This envelope alone does not establish HCP compatibility.
-type WebhookPayload struct {
-	EventID          string              `json:"event_id"`
-	EventAction      string              `json:"event_action"`
-	EventDescription string              `json:"event_description"`
-	EventSource      string              `json:"event_source"`
-	EventVersion     string              `json:"event_version"`
-	ResourceID       string              `json:"resource_id"`
-	ResourceName     string              `json:"resource_name"`
-	EventPayload     WebhookEventPayload `json:"event_payload"`
+type Payload struct {
+	EventID          string       `json:"event_id"`
+	EventAction      string       `json:"event_action"`
+	EventDescription string       `json:"event_description"`
+	EventSource      string       `json:"event_source"`
+	EventVersion     string       `json:"event_version"`
+	ResourceID       string       `json:"resource_id"`
+	ResourceName     string       `json:"resource_name"`
+	EventPayload     EventPayload `json:"event_payload"`
 }
 
-// WebhookEventPayload holds the event's secret name and optional metadata.
+// EventPayload holds the event's secret name and optional metadata.
 // Name is matched against tracked Docker names and Vault path suffixes.
-type WebhookEventPayload struct {
+type EventPayload struct {
 	AppName        string `json:"app_name"`
 	Name           string `json:"name"`
 	OrganizationID string `json:"organization_id"`
@@ -56,9 +56,9 @@ type WebhookEventPayload struct {
 	Version        int    `json:"version"`
 }
 
-// WebhookConfig configures the HTTP listener. The driver supplies defaults;
-// NewWebhookServer uses the supplied values without applying defaults.
-type WebhookConfig struct {
+// Config configures the HTTP listener. The driver supplies defaults;
+// NewServer uses the supplied values without applying defaults.
+type Config struct {
 	// Port is the TCP listener port on all interfaces; the driver defaults to 9095.
 	Port int
 	// WebhookSecret is the shared token for the current HMAC-SHA256 validator.
@@ -67,11 +67,11 @@ type WebhookConfig struct {
 	WebhookSecret string
 }
 
-// WebhookServer receives HCP-style notifications and reconciles one request at
+// Server receives HCP-style notifications and reconciles one request at
 // a time. It provides no Vault-side event subscription. The current SHA-256
 // signature validator is incompatible with HCP's documented SHA-512 signatures.
-type WebhookServer struct {
-	config    *WebhookConfig
+type Server struct {
+	config    *Config
 	reconcile ReconcileFunc
 	server    *http.Server
 	ctx       context.Context
@@ -91,14 +91,14 @@ var actionable = map[string]bool{
 	"rotate": true,
 }
 
-// NewWebhookServer prepares /webhook and /webhook/health without binding a port.
+// NewServer prepares /webhook and /webhook/health without binding a port.
 // cfg and reconcile must be non-nil; callers must not mutate cfg during use.
 // Call Start to listen and Stop to cancel and drain in-flight reconciliation.
-func NewWebhookServer(cfg *WebhookConfig, reconcile ReconcileFunc) *WebhookServer {
+func NewServer(cfg *Config, reconcile ReconcileFunc) *Server {
 	mux := http.NewServeMux()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ws := &WebhookServer{
+	ws := &Server{
 		config:    cfg,
 		reconcile: reconcile,
 		ctx:       ctx,
@@ -122,7 +122,7 @@ func NewWebhookServer(cfg *WebhookConfig, reconcile ReconcileFunc) *WebhookServe
 // Start listens until Stop is called or the HTTP server fails. It returns
 // listener/server errors and treats normal shutdown as success. Call it in a
 // goroutine when the caller must continue serving the Docker plugin socket.
-func (ws *WebhookServer) Start() error {
+func (ws *Server) Start() error {
 	if ws.config.WebhookSecret == "" {
 		log.Warn("Webhook secret is unset; webhook requests are unauthenticated")
 	}
@@ -137,7 +137,7 @@ func (ws *WebhookServer) Start() error {
 // Stop cancels in-flight reconciliation and drains HTTP requests and callbacks
 // for up to five seconds. It returns an error if shutdown or draining times out.
 // A stopped server cannot be restarted.
-func (ws *WebhookServer) Stop() error {
+func (ws *Server) Stop() error {
 	ws.workMu.Lock()
 	ws.stopping = true
 	ws.cancel()
@@ -167,7 +167,7 @@ func (ws *WebhookServer) Stop() error {
 
 // HTTP handlers
 
-func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
+func (ws *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -208,7 +208,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse payload
-	var payload WebhookPayload
+	var payload Payload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		log.Errorf("webhook: failed to parse payload: %v", err)
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -287,7 +287,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (ws *WebhookServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (ws *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, `{"status":"ok","webhook_enabled":true}`)
@@ -298,7 +298,7 @@ func (ws *WebhookServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 // verifyHMAC checks the X-HCP-Webhook-Signature header against the raw body.
 // This implementation uses HMAC-SHA256; HCP documents HMAC-SHA512, so direct
 // HCP signatures are not compatible with the current validator.
-func (ws *WebhookServer) verifyHMAC(body []byte, signature string) bool {
+func (ws *Server) verifyHMAC(body []byte, signature string) bool {
 	mac := hmac.New(sha256.New, []byte(ws.config.WebhookSecret))
 	mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))

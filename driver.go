@@ -20,6 +20,7 @@ import (
 
 	"github.com/sciops-org/swarm-external-secrets/internal/secrettransform"
 	"github.com/sciops-org/swarm-external-secrets/internal/utils"
+	vaultwebhook "github.com/sciops-org/swarm-external-secrets/internal/webhook/vault"
 	"github.com/sciops-org/swarm-external-secrets/monitoring"
 	"github.com/sciops-org/swarm-external-secrets/providers"
 )
@@ -36,7 +37,7 @@ type SecretsDriver struct {
 	monitorCancel context.CancelFunc
 	monitor       *monitoring.Monitor
 	webInterface  *monitoring.WebInterface
-	webhookServer *providers.WebhookServer
+	webhookServer *vaultwebhook.Server
 }
 
 // SecretsConfig holds the configuration for the multi-provider driver
@@ -134,11 +135,11 @@ func NewDriver() (*SecretsDriver, error) {
 	// Start webhook or ticker reconciliation if rotation is enabled and the provider supports it.
 	if config.EnableRotation && provider.SupportsRotation() && config.UseWebhook && config.ProviderType == "vault" {
 		log.Printf("USE_WEBHOOK=true detected for Vault provider; starting webhook server on port %d", config.WebhookPort)
-		webhookCfg := &providers.WebhookConfig{
+		webhookCfg := &vaultwebhook.Config{
 			Port:          config.WebhookPort,
 			WebhookSecret: config.WebhookSecret,
 		}
-		driver.webhookServer = providers.NewWebhookServer(webhookCfg, driver.ReconcileSecret)
+		driver.webhookServer = vaultwebhook.NewServer(webhookCfg, driver.ReconcileSecret)
 		go func() {
 			if err := driver.webhookServer.Start(); err != nil {
 				log.Errorf("Webhook server failed; falling back to polling: %v", err)
