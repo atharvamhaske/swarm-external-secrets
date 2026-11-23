@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -19,7 +21,7 @@ import (
 // the existing ticker and the new webhook path can share the same
 // fetch-and-update logic.
 // The function receives the Docker secret name that needs to be reconciled.
-type ReconcileFunc func(secretName string) error
+type ReconcileFunc func(ctx context.Context, secretName string) error
 
 // HCP Vault Secrets webhook payload types -----
 
@@ -66,6 +68,12 @@ type WebhookServer struct {
 	config    *WebhookConfig
 	reconcile ReconcileFunc
 	server    *http.Server
+	ctx       context.Context
+	cancel    context.CancelFunc
+	workMu    sync.Mutex
+	stopping  bool
+	work      sync.WaitGroup
+	active    chan struct{}
 }
 
 // actionable is the set of HCP event actions that should trigger a
@@ -80,10 +88,14 @@ var actionable = map[string]bool{
 // NewWebhookServer creates a ready-to-start webhook server.
 func NewWebhookServer(cfg *WebhookConfig, reconcile ReconcileFunc) *WebhookServer {
 	mux := http.NewServeMux()
+	ctx, cancel := context.WithCancel(context.Background())
 
 	ws := &WebhookServer{
 		config:    cfg,
 		reconcile: reconcile,
+		ctx:       ctx,
+		cancel:    cancel,
+		active:    make(chan struct{}, 1),
 		server: &http.Server{
 			Addr:              fmt.Sprintf(":%d", cfg.Port),
 			Handler:           mux,
@@ -101,6 +113,9 @@ func NewWebhookServer(cfg *WebhookConfig, reconcile ReconcileFunc) *WebhookServe
 
 // Start begins listening.  This method blocks; call it in a goroutine.
 func (ws *WebhookServer) Start() error {
+	if ws.config.WebhookSecret == "" {
+		log.Warn("Webhook secret is unset; webhook requests are unauthenticated")
+	}
 	log.Printf("Webhook server listening on %s", ws.server.Addr)
 	if err := ws.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Errorf("Webhook server error: %v", err)
@@ -111,9 +126,31 @@ func (ws *WebhookServer) Start() error {
 
 // Stop gracefully shuts the server down.
 func (ws *WebhookServer) Stop() error {
+	ws.workMu.Lock()
+	ws.stopping = true
+	ws.cancel()
+	ws.workMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return ws.server.Shutdown(ctx)
+	err := ws.server.Shutdown(ctx)
+	if err != nil {
+		_ = ws.server.Close()
+	}
+	done := make(chan struct{})
+	go func() {
+		ws.work.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return err
+	case <-ctx.Done():
+		if err != nil {
+			return err
+		}
+		return ctx.Err()
+	}
 }
 
 // HTTP handlers
@@ -131,8 +168,13 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024*1024))
 	if err != nil {
+		var sizeError *http.MaxBytesError
+		if errors.As(err, &sizeError) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		log.Errorf("webhook: failed to read request body: %v", err)
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
@@ -192,9 +234,27 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trigger reconciliation asynchronously
+	ws.workMu.Lock()
+	if ws.stopping {
+		ws.workMu.Unlock()
+		http.Error(w, "server shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	select {
+	case ws.active <- struct{}{}:
+	default:
+		ws.workMu.Unlock()
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "reconciliation busy", http.StatusServiceUnavailable)
+		return
+	}
+	ws.work.Add(1)
+	ws.workMu.Unlock()
 	go func() {
+		defer ws.work.Done()
+		defer func() { <-ws.active }()
 		log.Printf("webhook: reconciling secret %q (action=%s)", secretName, payload.EventAction)
-		if err := ws.reconcile(secretName); err != nil {
+		if err := ws.reconcile(ws.ctx, secretName); err != nil {
 			log.Errorf("webhook: reconciliation failed for %q: %v", secretName, err)
 		} else {
 			log.Printf("webhook: successfully reconciled secret %q", secretName)

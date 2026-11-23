@@ -19,17 +19,14 @@ SECRET_VALUE="vault-smoke-pass-v1"
 SECRET_VALUE_ROTATED="vault-smoke-pass-v2"
 COMPOSE_FILE="${SCRIPT_DIR}/smoke-vault-compose.yml"
 POLICY_FILE="${REPO_ROOT}/vault_conf/admin.hcl"
-WEBHOOK_CONFIG_FILE="${REPO_ROOT}/.tmp/vault-webhook-config.json"
 EXIT_CODE=0
 # Cleanup trap
 cleanup() {
     echo -e "${RED}Running Vault smoke test cleanup...${DEF}"
-    stop_webhook_config_ui
     remove_stack "${STACK_NAME}"
     docker secret rm "${SECRET_NAME}" 2>/dev/null || true
     docker stop "${VAULT_CONTAINER}" 2>/dev/null || true
     docker rm   "${VAULT_CONTAINER}" 2>/dev/null || true
-    rm -f "${WEBHOOK_CONFIG_FILE}" "${WEBHOOK_CONFIG_FILE}.ui.log"
     remove_plugin
     exit "${EXIT_CODE}"
 }
@@ -79,10 +76,6 @@ VAULT_TOKEN=$(docker exec "${VAULT_CONTAINER}" \
         -policy="smoke-policy" \
         -field=token)
 success "Got auth token: ${VAULT_TOKEN}"
-
-# Create webhook config through the local HCP-style UI.
-start_webhook_config_ui "${WEBHOOK_CONFIG_FILE}"
-create_webhook_config_with_playwright "${WEBHOOK_CONFIG_FILE}"
 
 # Put the auth token in the plugin
 info "Building plugin and setting Vault auth token..."
@@ -137,7 +130,14 @@ docker exec "${VAULT_CONTAINER}" \
 success "Secret rotated to: ${SECRET_VALUE_ROTATED}"
 
 info "Sending signed Vault webhook event..."
-send_vault_webhook_event "${WEBHOOK_CONFIG_FILE}" "rotate" "database" "mysql" "secret/data/${SECRET_PATH}"
+WEBHOOK_PAYLOAD='{"event_action":"rotate","event_source":"hashicorp.secrets.secret","event_payload":{"name":"mysql"}}'
+WEBHOOK_SIGNATURE=$(printf '%s' "${WEBHOOK_PAYLOAD}" | openssl dgst -sha256 -hmac "${WEBHOOK_SECRET}" -hex)
+WEBHOOK_SIGNATURE="${WEBHOOK_SIGNATURE##* }"
+curl --fail --silent --show-error --max-time 10 \
+    -H "Content-Type: application/json" \
+    -H "X-HCP-Webhook-Signature: ${WEBHOOK_SIGNATURE}" \
+    --data-binary "${WEBHOOK_PAYLOAD}" \
+    "http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH}"
 assert_no_sensitive_rotation_metadata_logs
 
 info "Logging service output after rotation..."

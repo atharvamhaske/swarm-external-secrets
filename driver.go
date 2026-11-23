@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -16,10 +17,10 @@ import (
 	"github.com/docker/go-plugins-helpers/secrets"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/secrettransform"
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
-	"github.com/sugar-org/swarm-external-secrets/monitoring"
-	"github.com/sugar-org/swarm-external-secrets/providers"
+	"github.com/sciops-org/swarm-external-secrets/internal/secrettransform"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/monitoring"
+	"github.com/sciops-org/swarm-external-secrets/providers"
 )
 
 // SecretsDriver implements the secrets.Driver interface with multi-provider support
@@ -133,7 +134,8 @@ func NewDriver() (*SecretsDriver, error) {
 		driver.webhookServer = providers.NewWebhookServer(webhookCfg, driver.ReconcileSecret)
 		go func() {
 			if err := driver.webhookServer.Start(); err != nil {
-				log.Errorf("Webhook server failed: %v", err)
+				log.Errorf("Webhook server failed; falling back to polling: %v", err)
+				driver.startMonitoring()
 			}
 		}()
 	} else if config.EnableRotation && provider.SupportsRotation() {
@@ -264,33 +266,41 @@ func (d *SecretsDriver) shouldNotReuse(req secrets.Request) bool {
 
 // ReconcileSecret is used by the webhook path to reconcile tracked secrets
 // without waiting for the ticker interval.
-func (d *SecretsDriver) ReconcileSecret(secretName string) error {
+func (d *SecretsDriver) ReconcileSecret(ctx context.Context, secretName string) error {
 	d.trackerMutex.RLock()
-	secretInfo, exists := d.secretTracker[secretName]
-	if !exists {
-		for trackedName, trackedSecret := range d.secretTracker {
-			if strings.HasSuffix(trackedSecret.SecretPath, "/"+secretName) {
-				secretName = trackedName
-				secretInfo = trackedSecret
-				exists = true
-				break
-			}
+	var matches []*providers.SecretInfo
+	for trackedName, trackedSecret := range d.secretTracker {
+		if trackedName == secretName || strings.HasSuffix(trackedSecret.SecretPath, "/"+secretName) {
+			info := *trackedSecret
+			info.Labels = maps.Clone(trackedSecret.Labels)
+			info.ServiceNames = slices.Clone(trackedSecret.ServiceNames)
+			matches = append(matches, &info)
 		}
 	}
 	d.trackerMutex.RUnlock()
 
-	if !exists {
+	if len(matches) == 0 {
 		log.Printf("webhook: secret %q is not currently tracked, skipping", secretName)
-		return nil
+		return ctx.Err()
 	}
 
-	if !d.hasSecretChanged(secretInfo) {
-		log.Debugf("webhook: secret %q is already up to date", secretName)
-		return nil
+	var failures []error
+	for _, info := range matches {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		changed, err := d.hasSecretChanged(ctx, info)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if changed {
+			if err := d.handleSecretRotationResult(ctx, info.DockerSecretName, info); err != nil {
+				failures = append(failures, err)
+			}
+		}
 	}
-
-	d.handleSecretRotationResult(secretName, secretInfo)
-	return nil
+	return errors.Join(failures...)
 }
 
 // trackSecret adds or updates a secret in the tracking system
@@ -373,42 +383,48 @@ func (d *SecretsDriver) checkForSecretChanges() {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			if !d.hasSecretChanged(secretInfo) {
+			changed, err := d.hasSecretChanged(d.monitorCtx, secretInfo)
+			if err != nil {
+				log.Errorf("Error checking secret change for %s: %v", secretName, err)
+				return
+			}
+			if !changed {
 				return
 			}
 
 			log.Tracef("Detected change in secret: %s", secretName)
-			d.handleSecretRotationResult(secretName, secretInfo)
+			if err := d.handleSecretRotationResult(d.monitorCtx, secretName, secretInfo); err != nil {
+				log.Errorf("Failed to rotate secret %s: %v", secretName, err)
+			}
 		}(secretName, secretInfo)
 	}
 
 	wg.Wait()
 }
 
-func (d *SecretsDriver) handleSecretRotationResult(secretName string, secretInfo *providers.SecretInfo) {
-	if err := d.rotateSecret(secretInfo); err != nil {
-		log.Errorf("Failed to rotate secret %s: %v", secretName, err)
+func (d *SecretsDriver) handleSecretRotationResult(ctx context.Context, secretName string, secretInfo *providers.SecretInfo) error {
+	if err := d.rotateSecret(ctx, secretInfo); err != nil {
 		if d.monitor != nil {
 			d.monitor.IncrementRotationErrors()
 		}
-		return
+		return fmt.Errorf("rotate secret %s: %w", secretName, err)
 	}
 
 	if d.monitor != nil {
 		d.monitor.IncrementSecretRotations()
 	}
+	return nil
 }
 
 // hasSecretChanged fetches the current secret value and compares its hash
 // against the stored hash to detect changes.
-func (d *SecretsDriver) hasSecretChanged(secretInfo *providers.SecretInfo) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (d *SecretsDriver) hasSecretChanged(ctx context.Context, secretInfo *providers.SecretInfo) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	currentValue, err := d.provider.GetSecret(ctx, secretInfo)
 	if err != nil {
-		log.Errorf("Error checking secret change for %s: %v", secretInfo.DockerSecretName, err)
-		return false
+		return false, fmt.Errorf("check secret %s: %w", secretInfo.DockerSecretName, err)
 	}
 
 	d.trackerMutex.RLock()
@@ -416,36 +432,40 @@ func (d *SecretsDriver) hasSecretChanged(secretInfo *providers.SecretInfo) bool 
 	d.trackerMutex.RUnlock()
 
 	currentHash := fmt.Sprintf("%x", sha256.Sum256(currentValue))
-	return currentHash != lastHash
+	return currentHash != lastHash, nil
 }
 
 // rotateSecret handles the secret rotation process
-func (d *SecretsDriver) rotateSecret(secretInfo *providers.SecretInfo) error {
+func (d *SecretsDriver) rotateSecret(ctx context.Context, secretInfo *providers.SecretInfo) error {
 	log.Infof("Starting rotation for secret: %s", secretInfo.DockerSecretName)
 
 	// Get the new secret value from the provider using the existing SecretInfo
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	providerValue, err := d.provider.GetSecret(ctx, secretInfo)
+	providerValue, err := d.provider.GetSecret(fetchCtx, secretInfo)
 	if err != nil {
-		return fmt.Errorf("failed to get updated secret from provider: %v", err)
+		return fmt.Errorf("failed to get updated secret from provider: %w", err)
 	}
 
-	newValue, err := d.transformSecret(ctx, secretInfo, providerValue)
+	newValue, err := d.transformSecret(fetchCtx, secretInfo, providerValue)
 	if err != nil {
 		return fmt.Errorf("failed to transform updated secret: %w", err)
 	}
 
 	// Update Docker secret (this now handles service updates internally)
-	if err := d.updateDockerSecret(secretInfo.DockerSecretName, newValue); err != nil {
-		return fmt.Errorf("failed to update docker secret: %v", err)
+	if err := d.updateDockerSecret(ctx, secretInfo.DockerSecretName, newValue); err != nil {
+		return fmt.Errorf("failed to update docker secret: %w", err)
 	}
 
 	// Update tracking information
 	d.trackerMutex.Lock()
 	secretInfo.LastHash = fmt.Sprintf("%x", sha256.Sum256(providerValue))
 	secretInfo.LastUpdated = time.Now()
+	if tracked := d.secretTracker[secretInfo.DockerSecretName]; tracked != nil && tracked != secretInfo {
+		tracked.LastHash = secretInfo.LastHash
+		tracked.LastUpdated = secretInfo.LastUpdated
+	}
 	d.trackerMutex.Unlock()
 
 	log.Infof("Successfully rotated secret: %s", secretInfo.DockerSecretName)
@@ -453,14 +473,14 @@ func (d *SecretsDriver) rotateSecret(secretInfo *providers.SecretInfo) error {
 }
 
 // updateDockerSecret creates a new version of the Docker secret
-func (d *SecretsDriver) updateDockerSecret(secretName string, newValue []byte) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (d *SecretsDriver) updateDockerSecret(ctx context.Context, secretName string, newValue []byte) error {
+	dockerCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	// List existing secrets to find the one to update
-	secrets, err := d.dockerClient.SecretList(ctx, swarm.SecretListOptions{})
+	secrets, err := d.dockerClient.SecretList(dockerCtx, swarm.SecretListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to list secrets: %v", err)
+		return fmt.Errorf("failed to list secrets: %w", err)
 	}
 
 	var existingSecret *swarm.Secret
@@ -488,24 +508,26 @@ func (d *SecretsDriver) updateDockerSecret(secretName string, newValue []byte) e
 	}
 
 	// Create the new secret
-	createResponse, err := d.dockerClient.SecretCreate(ctx, newSecretSpec)
+	createResponse, err := d.dockerClient.SecretCreate(dockerCtx, newSecretSpec)
 	if err != nil {
-		return fmt.Errorf("failed to create new secret version: %v", err)
+		return fmt.Errorf("failed to create new secret version: %w", err)
 	}
 
 	log.Infof("Created new version of secret %s with name %s and ID: %s", secretName, newSecretName, createResponse.ID)
 
 	// Update all services that use this secret to point to the new version
-	if err := d.updateServicesSecretReference(secretName, existingSecret.ID, newSecretName, createResponse.ID); err != nil {
-		// try to remove the new secret since service update failed
-		if cleanupErr := d.dockerClient.SecretRemove(ctx, createResponse.ID); cleanupErr != nil {
+	if err := d.updateServicesSecretReference(ctx, secretName, existingSecret.ID, newSecretName, createResponse.ID); err != nil {
+		// Rollback must still run when shutdown cancels reconciliation.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cleanupCancel()
+		if cleanupErr := d.dockerClient.SecretRemove(cleanupCtx, createResponse.ID); cleanupErr != nil {
 			log.Warnf("failed to remove new secret %s after service update error: %v", createResponse.ID, cleanupErr)
 		}
-		return fmt.Errorf("failed to update services to use new secret: %v", err)
+		return fmt.Errorf("failed to update services to use new secret: %w", err)
 	}
 
 	// Remove the old secret only after services are updated
-	if err := d.dockerClient.SecretRemove(ctx, existingSecret.ID); err != nil {
+	if err := d.dockerClient.SecretRemove(dockerCtx, existingSecret.ID); err != nil {
 		log.Warnf("Failed to remove old secret version %s: %v", existingSecret.ID, err)
 		// Don't return error as the new secret was created and services updated successfully
 	}
@@ -514,14 +536,14 @@ func (d *SecretsDriver) updateDockerSecret(secretName string, newValue []byte) e
 }
 
 // updateServicesSecretReference updates all services to use the new secret version
-func (d *SecretsDriver) updateServicesSecretReference(oldSecretName, oldSecretID, newSecretName, newSecretID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+func (d *SecretsDriver) updateServicesSecretReference(ctx context.Context, oldSecretName, oldSecretID, newSecretName, newSecretID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	// List all services
 	services, err := d.dockerClient.ServiceList(ctx, swarm.ServiceListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to list services: %v", err)
+		return fmt.Errorf("failed to list services: %w", err)
 	}
 
 	var updatedServices []string
@@ -612,7 +634,7 @@ func (d *SecretsDriver) applyServiceSecretUpdate(
 
 	updateResponse, err := d.dockerClient.ServiceUpdate(ctx, service.ID, service.Version, serviceSpec, swarm.ServiceUpdateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to update service %s: %v", service.Spec.Name, err)
+		return fmt.Errorf("failed to update service %s: %w", service.Spec.Name, err)
 	}
 
 	if len(updateResponse.Warnings) > 0 {

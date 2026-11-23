@@ -20,6 +20,7 @@ This project is a Docker Swarm secrets plugin that integrates with HashiCorp Vau
   - [Running Tests](#running-tests)
   - [Linting](#linting)
 - [Submitting a Pull Request](#submitting-a-pull-request)
+- [AI-Assisted Contributions](#ai-assisted-contributions)
 - [Adding a New Provider](#adding-a-new-provider)
 - [Documentation](#documentation)
 - [Google Summer of Code 2026](#google-summer-of-code-2026)
@@ -71,7 +72,7 @@ cd swarm-external-secrets
 3. Add the upstream remote:
 
 ```bash
-git remote add upstream https://github.com/sugar-org/swarm-external-secrets.git
+git remote add upstream https://github.com/sciops-org/swarm-external-secrets.git
 ```
 
 ### Set Up the Development Environment
@@ -205,11 +206,41 @@ golangci-lint run ./... --timeout 10m
    - ✅ `fix: handle Vault token renewal race condition`
    - ❌ `fixed stuff`
 
-6. **Push your branch** and open a Pull Request against `main`.
+6. **Review your diff, then push your branch** and open a Pull Request against
+   `main`. If you used an AI tool, you must personally review and understand
+   the generated output before pushing.
 
 7. Fill in the PR template completely — include a description of the change, how it was tested, and any relevant issue numbers.
 
 8. A maintainer will review your PR. Address feedback promptly.
+
+---
+
+## AI-Assisted Contributions
+
+AI tools may help with a contribution, but the human contributor is responsible
+for every submitted line. Before submitting an AI-assisted contribution:
+
+- Review the complete diff and understand the purpose, design, and security
+  implications of every change.
+- Run the relevant tests and checks, or explain in the pull request why a
+  check could not be run.
+- Keep the change focused and confirm that it does not duplicate an existing
+  issue or pull request.
+- Disclose substantial AI assistance in the pull request template.
+- Be ready to explain the change and make requested revisions during review.
+
+Any AI coding agent may post PR review comments on behalf of a contributor or
+maintainer who requests the review, including review summaries, inline comments,
+and review-thread replies, under the authorization rules in
+[`AGENTS.md`](AGENTS.md). That person remains responsible for the review content.
+Agents must not push branches, open or merge pull requests, post issues or
+unrelated comments, or create releases. The full requirements for agents,
+review credentials, and AI-assisted work are in `AGENTS.md`.
+
+Maintainers may close contributions that are unreviewed, unexplained,
+duplicative, excessively broad, or generated and submitted without meaningful
+human involvement.
 
 ---
 
@@ -227,7 +258,7 @@ To add support for a new secret backend:
 
 ## Documentation
 
-Documentation source files live in the [docs directory](https://github.com/sugar-org/swarm-external-secrets/tree/main/docs) and are built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/).
+Documentation source files live in the [docs directory](https://github.com/sciops-org/swarm-external-secrets/tree/main/docs) and are built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/).
 
 To preview the docs locally, activate the conda environment first, then serve the docs:
 ```bash
@@ -246,7 +277,7 @@ When contributing documentation:
 
 **swarm-external-secrets** is participating in [Google Summer of Code 2026](https://summerofcode.withgoogle.com/) under [OpenScienceLabs](http://opensciencelabs.org/).
 
-If you are a student looking to apply, please review the [Project Ideas Wiki](https://github.com/sugar-org/swarm-external-secrets/wiki/Project-Ideas) and start contributing early. Please focus on small implementations or bugfixes and only change the necessary code,"less is more." PRs that are too long or contain unnecessary changes are impossible to review and will be closed.
+If you are a student looking to apply, please review the [Project Ideas Wiki](https://github.com/sciops-org/swarm-external-secrets/wiki/Project-Ideas) and start contributing early. Please focus on small implementations or bugfixes and only change the necessary code,"less is more." PRs that are too long or contain unnecessary changes are impossible to review and will be closed.
 
 Feel free to ping us if you need help or use the `#gsoc` channel on [discord](https://discord.gg/GaYjnbtqQ).
 
@@ -257,7 +288,7 @@ GSoC is a program centered on mentorship, learning, and authentic engagement wit
 * **Authentic Contribution:** We expect all contributions , from proposal writing to final code to be the result of your own learning and critical thinking. While AI can be a supportive tool for debugging or boilerplate, it must not be the "author" of your work.
 * **Zero-Value Submissions:** Simply feeding a prompt to an AI and posting the output (whether as a code change, documentation update, or issue comment) is considered low-value and will be rejected. Contributions must include value added through your own technical competency and understanding of the project context.
 * **Human-in-the-Loop:** If you use generative AI as an aid, you must fully understand every change you submit. You are expected to explain the rationale behind your technical decisions during code reviews. If you cannot explain why a specific approach was taken, the contribution will not be accepted.
-* **Prohibition of Automated Agents:** The use of automated AI agents, bots, or scripts to submit issues or pull requests is strictly forbidden. Any account found using such tools to interact with the repository may be blocked and reported to the GSoC program administrators.
+* **Prohibition of Automated Submissions:** The use of automated AI agents, bots, or scripts to submit issues or pull requests is strictly forbidden. AI agents may post PR review comments on behalf of a contributor or maintainer who requests the review, as authorized by [`AGENTS.md`](AGENTS.md). Accounts using automated tools for prohibited submissions may be blocked and reported to the GSoC program administrators.
 * **Disclosure:** If AI was used significantly to assist in a contribution (e.g., to refactor a complex function), please disclose this in your pull request description. Transparency helps mentors provide better guidance.
 * **Reviewer Capacity:** Our mentors have limited bandwidth. To protect their capacity for human-to-human mentorship, we reserve the right to rigorously reject contributions that appear to be high-volume, AI-generated, or lack human verification.
 

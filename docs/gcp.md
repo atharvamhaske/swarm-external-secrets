@@ -1,7 +1,7 @@
 # GCP Secret Manager — Operation Guide
 
 > **Provider:** Google Cloud Platform (GCP) Secret Manager
-> **Plugin:** [swarm-external-secrets](https://github.com/sugar-org/swarm-external-secrets)
+> **Plugin:** [swarm-external-secrets](https://github.com/sciops-org/swarm-external-secrets)
 
 This guide walks you through setting up and using GCP Secret Manager as a secrets provider for `swarm-external-secrets` — from enabling the API all the way to reading live secrets inside a running Docker container.
 

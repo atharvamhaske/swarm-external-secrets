@@ -2,9 +2,19 @@ name: vet OSS Components
 
 on:
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "**/*.md"
+      - "mkdocs.yml"
   push:
     branches:
       - main
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "**/*.md"
+      - "mkdocs.yml"
 
 permissions:
   # Required for actions/checkout@v4
@@ -34,6 +44,7 @@ jobs:
           # Path to the policy file.
           # Remove following line to use the default policy
           policy: .github/vet/policy.yml
+          exception-file: .github/vet/exceptions.yml
         env:
           # Required for writing pull request comment
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

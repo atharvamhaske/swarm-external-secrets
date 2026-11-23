@@ -14,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 
-	"github.com/sugar-org/swarm-external-secrets/providers"
+	"github.com/sciops-org/swarm-external-secrets/providers"
 )
 
 // AWSKMSTransformer decrypts provider values when a secret opts in with labels.

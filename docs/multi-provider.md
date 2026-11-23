@@ -15,9 +15,15 @@ The Vault Swarm Plugin supports multiple secrets providers, allowing you to use 
 | `VAULT_ADDR` | Vault server address | `http://localhost:8200` |
 | `VAULT_TOKEN` | Vault token for authentication | — |
 | `VAULT_MOUNT_PATH` | Mount path for KV engine | `secret` |
-| `VAULT_AUTH_METHOD` | Authentication method (`token`, `approle`) | `token` |
+| `VAULT_KV_VERSION` | KV engine version (`1` or `2`) | `2` |
+| `VAULT_AUTH_METHOD` | Authentication method (`token`, `approle`, `jwt`) | `token` |
 | `VAULT_ROLE_ID` | Role ID for AppRole authentication | — |
 | `VAULT_SECRET_ID` | Secret ID for AppRole authentication | — |
+| `VAULT_APPROLE_AUTH_PATH` | AppRole auth mount path | `approle` |
+| `VAULT_JWT_ROLE` | JWT auth role name | — |
+| `VAULT_JWT` | Signed JWT (or use `VAULT_JWT_FILE`) | — |
+| `VAULT_JWT_FILE` | Path inside the plugin to a JWT file | — |
+| `VAULT_JWT_AUTH_PATH` | JWT auth mount path | `jwt` |
 | `VAULT_SKIP_VERIFY` | Skip TLS verification (not recommended for production) | `false` |
 
 **Example:**
@@ -28,10 +34,22 @@ docker plugin set swarm-external-secrets:latest \
     VAULT_TOKEN="hvs.example-token"
 ```
 
+JWT authentication (client token is renewed; see [Vault and OpenBao JWT](jwt.md)):
+
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="vault" \
+    VAULT_ADDR="https://vault.example.com:8200" \
+    VAULT_AUTH_METHOD="jwt" \
+    VAULT_JWT_ROLE="swarm-external-secrets" \
+    VAULT_JWT="<signed-jwt>"
+```
+
 **Mount Path Behavior:**
 
 - By default, Vault KV v2 secrets are read from the `secret` mount, so tracked paths use the `secret/data/...` form.
 - If you set `VAULT_MOUNT_PATH` to a custom mount such as `kv`, `prod`, or `dev`, the plugin uses that mount consistently for secret reads and rotation tracking, for example `kv/data/...`.
+- If your engine is KV v1, set `VAULT_KV_VERSION="1"`. Paths then use the `<mount>/...` form without injecting `/data/`: the default mount reads `secret/...`, and a custom mount such as `kv` reads `kv/...`. The default remains `2`, so existing v2 setups keep working unchanged. A literal `data/` folder in the secret name is preserved for KV v1 (for example, `vault_path: secret/data/mysql` reads secret `data/mysql` under mount `secret`), since `data/` is a valid path segment in KV v1.
 
 **Example with Custom Mount Path:**
 ```bash
@@ -40,6 +58,25 @@ docker plugin set swarm-external-secrets:latest \
     VAULT_ADDR="https://vault.example.com:8200" \
     VAULT_TOKEN="hvs.example-token" \
     VAULT_MOUNT_PATH="kv"
+```
+
+**Example with KV v1:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="vault" \
+    VAULT_ADDR="https://vault.example.com:8200" \
+    VAULT_TOKEN="hvs.example-token" \
+    VAULT_KV_VERSION="1"
+```
+
+**Example with KV v1 on a custom mount:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="vault" \
+    VAULT_ADDR="https://vault.example.com:8200" \
+    VAULT_TOKEN="hvs.example-token" \
+    VAULT_MOUNT_PATH="kv" \
+    VAULT_KV_VERSION="1"
 ```
 
 ---
@@ -115,9 +152,15 @@ docker plugin set swarm-external-secrets:latest \
 | `OPENBAO_ADDR` | OpenBao server address | `http://localhost:8200` |
 | `OPENBAO_TOKEN` | OpenBao token for authentication | — |
 | `OPENBAO_MOUNT_PATH` | Mount path for KV engine | `secret` |
-| `OPENBAO_AUTH_METHOD` | Authentication method (`token`, `approle`) | `token` |
+| `OPENBAO_KV_VERSION` | KV engine version (`1` or `2`) | `2` |
+| `OPENBAO_AUTH_METHOD` | Authentication method (`token`, `approle`, `jwt`) | `token` |
 | `OPENBAO_ROLE_ID` | Role ID for AppRole authentication | — |
 | `OPENBAO_SECRET_ID` | Secret ID for AppRole authentication | — |
+| `OPENBAO_APPROLE_AUTH_PATH` | AppRole auth mount path | `approle` |
+| `OPENBAO_JWT_ROLE` | JWT auth role name | — |
+| `OPENBAO_JWT` | Signed JWT (or use `OPENBAO_JWT_FILE`) | — |
+| `OPENBAO_JWT_FILE` | Path inside the plugin to a JWT file | — |
+| `OPENBAO_JWT_AUTH_PATH` | JWT auth mount path | `jwt` |
 | `OPENBAO_SKIP_VERIFY` | Skip TLS verification (not recommended for production) | `false` |
 
 **Example:**
@@ -128,10 +171,22 @@ docker plugin set swarm-external-secrets:latest \
     OPENBAO_TOKEN="ob_example-token"
 ```
 
+JWT authentication (client token is renewed; see [Vault and OpenBao JWT](jwt.md)):
+
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="openbao" \
+    OPENBAO_ADDR="https://openbao.example.com:8200" \
+    OPENBAO_AUTH_METHOD="jwt" \
+    OPENBAO_JWT_ROLE="swarm-external-secrets" \
+    OPENBAO_JWT="<signed-jwt>"
+```
+
 **Mount Path Behavior:**
 
 - By default, OpenBao KV v2 secrets are read from the `secret` mount, so tracked paths use the `secret/data/...` form.
 - If you set `OPENBAO_MOUNT_PATH` to a custom mount such as `kv`, `prod`, or `dev`, the plugin uses that mount consistently for secret reads and rotation tracking, for example `kv/data/...`.
+- If your engine is KV v1, set `OPENBAO_KV_VERSION="1"`. Paths then use the `<mount>/...` form without injecting `/data/`: the default mount reads `secret/...`, and a custom mount such as `kv` reads `kv/...`. The default remains `2`, so existing v2 setups keep working unchanged. A literal `data/` folder in the secret name is preserved for KV v1 (for example, `openbao_path: secret/data/mysql` reads secret `data/mysql` under mount `secret`), since `data/` is a valid path segment in KV v1.
 
 **Example with Custom Mount Path:**
 ```bash
@@ -142,9 +197,140 @@ docker plugin set swarm-external-secrets:latest \
     OPENBAO_MOUNT_PATH="kv"
 ```
 
+**Example with KV v1:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="openbao" \
+    OPENBAO_ADDR="https://openbao.example.com:8200" \
+    OPENBAO_TOKEN="ob_example-token" \
+    OPENBAO_KV_VERSION="1"
+```
+
+**Example with KV v1 on a custom mount:**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="openbao" \
+    OPENBAO_ADDR="https://openbao.example.com:8200" \
+    OPENBAO_TOKEN="ob_example-token" \
+    OPENBAO_MOUNT_PATH="kv" \
+    OPENBAO_KV_VERSION="1"
+```
+
 ---
 
-### 5. GCP Secret Manager (Placeholder)
+### 5. OCI Vault
+
+**Provider Type:** `oci`
+
+OCI Vault supports two authentication methods: API key (default) and instance principal. With API key auth, you provide credentials directly. With instance principal, the plugin authenticates using the compute instance's identity — no credentials needed, but the instance must have an appropriate IAM policy granting access to the vault.
+
+**Environment Variables:**
+
+| Variable | Description | Default |
+|---|---|---|
+| `OCI_AUTH_METHOD` | Authentication method (`api_key`, `instance_principal`) | `api_key` |
+| `OCI_REGION` | OCI region (required for `api_key`) | — |
+| `OCI_TENANCY_OCID` | Tenancy OCID (required for `api_key`) | — |
+| `OCI_USER_OCID` | User OCID (required for `api_key`) | — |
+| `OCI_FINGERPRINT` | API key fingerprint (required for `api_key`) | — |
+| `OCI_PRIVATE_KEY` | Base64-encoded PEM private key (required for `api_key`) | — |
+| `OCI_PRIVATE_KEY_PASSPHRASE` | Private key passphrase (only if key is encrypted) | — |
+| `OCI_VAULT_OCID` | Vault OCID (required for name-based lookups) | — |
+| `OCI_ENDPOINT` | API endpoint override (floci-oci: `http://localhost:4599`) | regional OCI endpoint |
+
+
+**Private Key Encoding:**
+
+Docker plugin environment variables do not support multiline values, so the PEM private key must be base64-encoded. If your private key is passphrase-protected, also set `OCI_PRIVATE_KEY_PASSPHRASE`.
+
+**Example:**
+
+```bash
+OCI_KEY=$(base64 < ~/.oci/oci_api_key.pem | tr -d '\n')
+
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="oci" \
+    OCI_AUTH_METHOD="api_key" \
+    OCI_REGION="us-ashburn-1" \
+    OCI_TENANCY_OCID="ocid1.tenancy.oc1..example" \
+    OCI_USER_OCID="ocid1.user.oc1..example" \
+    OCI_FINGERPRINT="aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99" \
+    OCI_PRIVATE_KEY="${OCI_KEY}" \
+    OCI_VAULT_OCID="ocid1.vault.oc1..example"
+```
+
+**Secret Labels:**
+
+| Label | Description |
+|---|---|
+| `oci_secret_ocid` | Fetch a secret directly by its OCID. No vault OCID is needed. |
+| `oci_secret_name` | Override the secret name for name-based lookups. |
+| `oci_vault_ocid` | Override the vault OCID for this specific secret. Takes priority over the plugin-level `OCI_VAULT_OCID`. |
+| `oci_stage` | Secret version stage (`current`, `previous`, `latest`, `pending`, `deprecated`) or a numeric version number (e.g. `3`). Defaults to `current`. |
+| `oci_field` | Extract a specific JSON field from the secret value. |
+
+**How secret lookup works:**
+
+The plugin resolves which secret to fetch using the following logic:
+
+1. **By OCID** — If `oci_secret_ocid` is set, the plugin fetches the secret directly by its OCID (e.g. `ocid1.vaultsecret.oc1...`). No vault OCID is needed.
+
+2. **By name** — Otherwise, the plugin performs a name-based lookup. If `oci_secret_name` is set, its value is used as-is. Otherwise the plugin constructs a name from the Docker service and secret names (`<service>-<secret>`, e.g. service `web` with secret `db_pass` becomes `web-db_pass`). Name-based lookups require a vault OCID.
+
+3. **Vault OCID resolution** — For name-based lookups, the `oci_vault_ocid` label takes priority over the plugin-level `OCI_VAULT_OCID` environment variable. This lets you fetch secrets from different vaults without running separate plugin instances. If neither is set, the request fails.
+
+4. **Field extraction** — If `oci_field` is set, the secret value is parsed as JSON and only the named field is returned. For example, if the secret contains `{"username":"admin","password":"s3cret"}`, setting `oci_field: "password"` returns `s3cret`. Non-JSON values are returned as-is.
+
+---
+
+### 6. Infisical
+
+**Provider Type:** `infisical`
+
+**Environment Variables:**
+
+| Variable | Description | Default |
+|---|---|---|
+| `INFISICAL_CLIENT_ID` | Machine identity Client ID (Universal Auth) | — |
+| `INFISICAL_CLIENT_SECRET` | Machine identity Client Secret (Universal Auth) | — |
+| `INFISICAL_TOKEN` | Pre-issued bearer/access token (optional if Universal Auth is set) | — |
+| `INFISICAL_PROJECT_ID` | Infisical project ID (required) | — |
+| `INFISICAL_ENVIRONMENT` | Environment slug (`dev`, `staging`, `prod`, …) | `dev` |
+| `INFISICAL_SECRET_PATH` | Default folder path for secrets | `/` |
+| `INFISICAL_SITE_URL` | Infisical site/API base URL | `https://app.infisical.com` |
+
+**Authentication:**
+
+- **Universal Auth (production):** set `INFISICAL_CLIENT_ID` + `INFISICAL_CLIENT_SECRET` for a machine identity.
+- **Access token:** set `INFISICAL_TOKEN` to a pre-issued Infisical bearer token (useful for short-lived testing).
+
+**Example (Universal Auth):**
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="infisical" \
+    INFISICAL_CLIENT_ID="..." \
+    INFISICAL_CLIENT_SECRET="..." \
+    INFISICAL_PROJECT_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" \
+    INFISICAL_ENVIRONMENT="prod" \
+    ENABLE_ROTATION="true" \
+    ROTATION_INTERVAL="30s"
+```
+
+**Secret Labels:**
+
+- `infisical_secret_name` — Infisical secret key (e.g. `MYSQL_PASSWORD`)
+- `infisical_field` — Optional JSON field to extract from the secret value (defaults to `value`)
+- `infisical_project_id` — Optional per-secret project override
+- `infisical_environment` — Optional per-secret environment override
+- `infisical_secret_path` — Optional per-secret folder path override
+
+If `infisical_secret_name` is omitted, the Docker secret name is uppercased (`mysql_password` → `MYSQL_PASSWORD`).
+
+See [`docs/infisical.md`](./infisical.md) for machine-identity setup and usage details.
+
+---
+
+### 7. GCP Secret Manager (Placeholder)
 
 **Provider Type:** `gcp`
 
@@ -202,6 +388,53 @@ secrets:
       azure_secret_name: "database-connection-string"
       azure_field: "connection_string"
 ```
+
+### OCI Vault
+
+```yaml
+secrets:
+  # Look up by name — uses the plugin-level OCI_VAULT_OCID
+  db_password:
+    driver: swarm-external-secrets:latest
+    labels:
+      oci_secret_name: "my-database-password"
+      oci_field: "password"
+
+  # Look up by name from a different vault using a per-secret override
+  analytics_key:
+    driver: swarm-external-secrets:latest
+    labels:
+      oci_secret_name: "analytics-api-key"
+      oci_vault_ocid: "ocid1.vault.oc1..other-vault"
+
+  # Look up by OCID — no vault OCID needed
+  api_token:
+    driver: swarm-external-secrets:latest
+    labels:
+      oci_secret_ocid: "ocid1.vaultsecret.oc1..example"
+
+  # Fetch the previous version of a secret (useful during rotation)
+  db_password_previous:
+    driver: swarm-external-secrets:latest
+    labels:
+      oci_secret_name: "my-database-password"
+      oci_stage: "previous"
+      oci_field: "password"
+```
+
+### Infisical
+
+```yaml
+secrets:
+  mysql_password:
+    driver: swarm-external-secrets:latest
+    labels:
+      infisical_secret_name: "MYSQL_PASSWORD"
+      # infisical_secret_path: "/database"
+```
+
+One plugin instance can target multiple Infisical projects and environments using per-secret `infisical_project_id` and `infisical_environment` labels, provided its credentials can access those contexts. Use separate plugin instances only when credentials, isolation requirements, or fixed configuration must differ.
+
 
 ## Multiple Providers in the Same Swarm Cluster
 
@@ -283,6 +516,10 @@ secrets:
 
 ## Provider-Specific Notes
 
+### HashiCorp Vault
+- Supports token, AppRole, and JWT authentication
+- JWT and AppRole client tokens are renewed at about two-thirds of TTL; static tokens are not (see [Vault and OpenBao JWT](jwt.md))
+
 ### AWS Secrets Manager
 - Supports IAM roles, access keys, and profiles
 - JSON secrets are parsed automatically
@@ -296,7 +533,21 @@ secrets:
 ### OpenBao
 - Fully compatible with Vault API
 - Use for Vault migration or open-source requirements
-- Supports all Vault authentication methods
+- Supports token, AppRole, and JWT authentication
+- JWT and AppRole client tokens are renewed at about two-thirds of TTL; static tokens are not (see [Vault and OpenBao JWT](jwt.md))
+
+### OCI Vault
+- Supports API key and instance principal authentication
+- `OCI_PRIVATE_KEY` must be base64-encoded (see [Private Key Encoding](#5-oci-vault))
+- Secrets can be referenced by name (`oci_secret_name`, requires a vault OCID) or by OCID (`oci_secret_ocid`)
+- The `oci_vault_ocid` label overrides the plugin-level `OCI_VAULT_OCID` per secret, allowing a single plugin instance to pull secrets from multiple vaults
+- Rotation is supported
+
+### Infisical
+- Uses the official Infisical Go SDK with Universal Auth or a bearer token
+- The SDK refreshes Universal Auth tokens; `INFISICAL_TOKEN` is used as-is
+- Supports per-secret overrides for project, environment, and folder path
+- Secret names default to the uppercased Docker secret name when `infisical_secret_name` is not set
 
 ### GCP Secret Manager
 - Currently a placeholder — will error on initialization
