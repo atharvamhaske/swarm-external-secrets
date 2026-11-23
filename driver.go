@@ -317,7 +317,8 @@ func (d *SecretsDriver) trackSecret(secretInfo *providers.SecretInfo, value []by
 	log.Tracef("Current provider %s tracking secret: %s at path: %s",
 		secretInfo.Provider, secretInfo.DockerSecretName, secretInfo.SecretPath)
 
-	// If already tracking, update service names and hash
+	// Repeated reads may come from a new consumer while existing services still
+	// mount the old value. Only a successful rotation may advance their hash.
 	if existing, exists := d.secretTracker[secretInfo.DockerSecretName]; exists {
 		// Add service name if not already present
 		serviceName := secretInfo.ServiceNames[0]
@@ -325,8 +326,6 @@ func (d *SecretsDriver) trackSecret(secretInfo *providers.SecretInfo, value []by
 		if !serviceFound && serviceName != "" {
 			existing.ServiceNames = append(existing.ServiceNames, serviceName)
 		}
-		existing.LastHash = hash
-		existing.LastUpdated = time.Now()
 		existing.Labels = secretInfo.Labels
 	} else {
 		secretInfo.LastHash = hash

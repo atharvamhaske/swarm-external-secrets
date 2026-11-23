@@ -251,6 +251,47 @@ doppler_init_backend() {
     return 0
 }
 
+# Compile before the readiness window: a cold Go build can take longer than
+# the server's startup deadline. Run the binary directly so cleanup owns its PID.
+start_doppler_mock() {
+    info "Building Doppler API mock server..."
+    MOCK_SERVER_DIR="$(mktemp -d -t smoke-doppler-server.XXXXXX)"
+    go build -o "${MOCK_SERVER_DIR}/mock-doppler-server" "${REPO_ROOT}/scripts/tests/mock-doppler-server"
+
+    info "Starting Doppler API mock server..."
+    "${MOCK_SERVER_DIR}/mock-doppler-server" --token "${DOPPLER_MOCK_TOKEN}" &
+    MOCK_SERVER_PID=$!
+
+    local elapsed=0
+    until curl -fsS --connect-timeout 1 --max-time 2 \
+        -H "Authorization: Bearer ${DOPPLER_MOCK_TOKEN}" \
+        "${DOPPLER_MOCK_URL}/v3/configs/config/secrets/download?format=json" >/dev/null; do
+        if ! kill -0 "${MOCK_SERVER_PID}" 2>/dev/null; then
+            local exit_code=0
+            wait "${MOCK_SERVER_PID}" || exit_code=$?
+            MOCK_SERVER_PID=""
+            die "Doppler mock server exited before becoming ready (status ${exit_code})."
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+        [[ "${elapsed}" -lt 15 ]] || die "Doppler mock server did not become ready within 15s."
+    done
+    success "Doppler mock server is ready."
+}
+
+stop_doppler_mock() {
+    if [[ -n "${MOCK_SERVER_PID:-}" ]]; then
+        kill "${MOCK_SERVER_PID}" 2>/dev/null || true
+        wait "${MOCK_SERVER_PID}" 2>/dev/null || true
+        MOCK_SERVER_PID=""
+    fi
+    if [[ -n "${MOCK_SERVER_DIR:-}" ]]; then
+        rm -f "${MOCK_SERVER_DIR}/mock-doppler-server"
+        rmdir "${MOCK_SERVER_DIR}"
+        MOCK_SERVER_DIR=""
+    fi
+}
+
 # Build the project/config query string shared by real-mode API calls.
 doppler_query() {
     local sep="?" qs=""

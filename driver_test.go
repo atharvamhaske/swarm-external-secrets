@@ -2,11 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api/types/swarm"
+	dockerclient "github.com/docker/docker/client"
+	"github.com/docker/go-plugins-helpers/secrets"
 
 	"github.com/sciops-org/swarm-external-secrets/providers"
 )
@@ -228,4 +235,139 @@ func (p *rotationLifecycleProvider) GetSecret(ctx context.Context, _ *providers.
 
 func (p *rotationLifecycleProvider) Close() error {
 	return p.close()
+}
+
+func TestRepeatedGetDoesNotAcknowledgeUnappliedRotation(t *testing.T) {
+	t.Parallel()
+	var current atomic.Value
+	current.Store("v1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"PASSWORD": current.Load().(string)})
+	}))
+	t.Cleanup(server.Close)
+	provider := &providers.DopplerProvider{}
+	if err := provider.Initialize(map[string]string{
+		"DOPPLER_TOKEN":     "dp.st.test",
+		"DOPPLER_API_URL":   server.URL,
+		"DOPPLER_CACHE_TTL": "0s",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	driver := &SecretsDriver{
+		provider:      provider,
+		config:        &SecretsConfig{EnableRotation: true},
+		secretTracker: make(map[string]*providers.SecretInfo),
+		monitorCtx:    t.Context(),
+	}
+	req := secrets.Request{
+		SecretName:   "password",
+		ServiceName:  "original-service",
+		SecretLabels: map[string]string{"doppler_secret_name": "PASSWORD"},
+	}
+	if resp := driver.Get(req); resp.Err != "" || string(resp.Value) != "v1" {
+		t.Fatalf("initial Get = %q, %q; want v1", resp.Value, resp.Err)
+	}
+	tracked := driver.secretTracker[req.SecretName]
+	initialHash, initialUpdated := tracked.LastHash, tracked.LastUpdated
+
+	// A reconnect/new consumer can fetch v2 while the original service still
+	// mounts v1. Only a successful rotation may acknowledge that change.
+	current.Store("v2")
+	req.ServiceName = "new-service"
+	req.SecretLabels["consumer"] = "new"
+	if resp := driver.Get(req); resp.Err != "" || string(resp.Value) != "v2" {
+		t.Fatalf("repeated Get = %q, %q; want v2", resp.Value, resp.Err)
+	}
+	if !driver.hasSecretChanged(tracked) {
+		t.Error("repeated Get hid a backend change before existing services rotated")
+	}
+	if tracked.LastHash != initialHash || !tracked.LastUpdated.Equal(initialUpdated) {
+		t.Error("repeated Get acknowledged an unapplied rotation")
+	}
+	if !slices.Contains(tracked.ServiceNames, "original-service") ||
+		!slices.Contains(tracked.ServiceNames, "new-service") || tracked.Labels["consumer"] != "new" {
+		t.Fatalf("consumer metadata was not refreshed: services=%v, labels=%v", tracked.ServiceNames, tracked.Labels)
+	}
+
+	client, operations := newRotationDockerClient(t, req.SecretName)
+	driver.dockerClient = client
+	driver.checkForSecretChanges()
+	for _, want := range []string{"create", "update", "remove"} {
+		select {
+		case got := <-operations:
+			if got != want {
+				t.Fatalf("Docker operation = %q, want %q", got, want)
+			}
+		default:
+			t.Fatalf("rotation did not perform Docker operation %q", want)
+		}
+	}
+	if tracked.LastHash == initialHash || driver.hasSecretChanged(tracked) {
+		t.Error("successful service rotation did not acknowledge v2")
+	}
+}
+
+// Exercise the actual Docker client and rotation flow without a daemon.
+func newRotationDockerClient(t *testing.T, secretName string) (*dockerclient.Client, <-chan string) {
+	t.Helper()
+	operations := make(chan string, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := strings.TrimPrefix(r.URL.Path, "/v1.51")
+		switch r.Method + " " + path {
+		case "GET /secrets":
+			_ = json.NewEncoder(w).Encode([]swarm.Secret{{
+				ID: "old-id", Spec: swarm.SecretSpec{Annotations: swarm.Annotations{Name: secretName}},
+			}})
+		case "POST /secrets/create":
+			var spec swarm.SecretSpec
+			if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
+				t.Error(err)
+			}
+			if string(spec.Data) != "v2" || !strings.HasPrefix(spec.Name, secretName+"-") {
+				t.Errorf("created secret name/data = %q/%q; want versioned name/v2", spec.Name, spec.Data)
+			}
+			operations <- "create"
+			_, _ = w.Write([]byte(`{"ID":"new-id"}`))
+		case "GET /services":
+			_ = json.NewEncoder(w).Encode([]swarm.Service{{
+				ID: "service-id", Meta: swarm.Meta{Version: swarm.Version{Index: 1}},
+				Spec: swarm.ServiceSpec{TaskTemplate: swarm.TaskSpec{ContainerSpec: &swarm.ContainerSpec{
+					Secrets: []*swarm.SecretReference{{
+						SecretID:   "old-id",
+						SecretName: secretName,
+						File:       &swarm.SecretReferenceFileTarget{Name: "password"},
+					}},
+				}}},
+			}})
+		case "POST /services/service-id/update":
+			var spec swarm.ServiceSpec
+			if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
+				t.Error(err)
+			}
+			if spec.TaskTemplate.ContainerSpec == nil || len(spec.TaskTemplate.ContainerSpec.Secrets) != 1 {
+				t.Error("updated service lost its secret reference")
+			} else {
+				ref := spec.TaskTemplate.ContainerSpec.Secrets[0]
+				if ref.SecretID != "new-id" || ref.File == nil || ref.File.Name != "password" {
+					t.Errorf("updated secret reference = %+v; want new-id at password", ref)
+				}
+			}
+			operations <- "update"
+			_, _ = w.Write([]byte(`{}`))
+		case "DELETE /secrets/old-id":
+			operations <- "remove"
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected Docker API request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := dockerclient.NewClientWithOpts(dockerclient.WithHost(server.URL), dockerclient.WithVersion("1.51"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client, operations
 }

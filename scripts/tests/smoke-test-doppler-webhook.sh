@@ -52,6 +52,7 @@ SECRET_VALUE="doppler-webhook-v1-${RUN_ID}"
 SECRET_VALUE_ROTATED="doppler-webhook-v2-${RUN_ID}"
 
 MOCK_SERVER_PID=""
+MOCK_SERVER_DIR=""
 
 doppler_init_backend
 
@@ -63,10 +64,7 @@ cleanup() {
     remove_stack "${STACK_NAME}"
     docker secret rm "${SECRET_NAME}" 2>/dev/null || true
     doppler_delete_secret "${SECRET_KEY}"
-    if [[ -n "${MOCK_SERVER_PID}" ]]; then
-        kill "${MOCK_SERVER_PID}" 2>/dev/null || true
-        wait "${MOCK_SERVER_PID}" 2>/dev/null || true
-    fi
+    stop_doppler_mock
     rm -f "${COMPOSE_FILE}"
     remove_plugin
     exit "${exit_code}"
@@ -86,19 +84,7 @@ info "Doppler webhook smoke test running in '${DOPPLER_MODE}' mode."
 write_doppler_compose "${COMPOSE_FILE}" "${SECRET_NAME}" "${SECRET_KEY}"
 
 if [[ "${DOPPLER_MODE}" == "mock" ]]; then
-    info "Starting Doppler API mock server..."
-    go run "${REPO_ROOT}/scripts/tests/mock-doppler-server" --token "${DOPPLER_MOCK_TOKEN}" &
-    MOCK_SERVER_PID=$!
-
-    elapsed=0
-    until curl -fsS \
-        -H "Authorization: Bearer ${DOPPLER_MOCK_TOKEN}" \
-        "${DOPPLER_MOCK_URL}/v3/configs/config/secrets/download?format=json" >/dev/null; do
-        sleep 1
-        elapsed=$((elapsed + 1))
-        [[ "${elapsed}" -lt 15 ]] || die "Doppler mock server did not become ready within 15s."
-    done
-    success "Doppler mock server is ready."
+    start_doppler_mock
 fi
 
 info "Seeding secret ${SECRET_KEY}..."
