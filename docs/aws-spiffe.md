@@ -15,6 +15,11 @@ credentials. No AWS access key is stored in the Docker plugin configuration.
 The SPIRE Agent must run once per Swarm node. It is not a service-task sidecar:
 Docker managed plugins have a separate lifecycle and runtime namespace.
 
+For normal deployments, provision the SPIRE Server, node-level Agents, and OIDC
+discovery provider separately. The plugin connects to the existing Agent's
+Workload API socket; it does not start these services. The local smoke test
+starts a temporary SPIRE Server and Agent for verification.
+
 This implementation does not use `credential_process` or generate an AWS
 credentials file. Those are useful for injecting credentials into an
 unmodified application. The plugin already owns its AWS SDK client, so it
@@ -116,12 +121,13 @@ sequenceDiagram
   Plugin-->>Engine: Docker secret response
   Engine-->>Service: Mount secret
 
-  Note over Plugin,STS: Cancellation and deadlines propagate through<br/>Secrets Manager → SPIRE → STS.
+  Note over Source,STS: JWT retrieval and STS exchange share<br/>one 30-second credential-refresh timeout.
 ```
 
 ## Prerequisites
 
-- A SPIRE Server and a node-level SPIRE Agent on every eligible Swarm node.
+- A SPIRE Server for your trust domain and a node-level SPIRE Agent on every
+  eligible Swarm node.
 - The SPIRE Agent Workload API exposed through a Unix socket.
 - A public HTTPS SPIRE OIDC discovery provider with a valid certificate.
 - SPIRE Server configured so JWT-SVIDs use that HTTPS URL as their issuer.
@@ -146,13 +152,14 @@ Docker managed plugins run under dockerd's plugin supervisor and do not appear
 as ordinary containers in `docker ps`. Use SPIRE's Unix workload attestor, not
 the Docker workload attestor.
 
-For production, register the plugin with a binary hash selector:
+For production, register the plugin with a binary hash selector. Replace the
+node ID and binary hash placeholders with your deployment's values:
 
 ```bash
 spire-server entry create \
-  -parentID spiffe://example.org/spire/agent/<node-id> \
+  -parentID "spiffe://example.org/spire/agent/<node-id>" \
   -spiffeID spiffe://example.org/swarm-external-secrets \
-  -selector unix:sha256:<sha256-of-plugin-binary>
+  -selector "unix:sha256:<sha256-of-plugin-binary>"
 ```
 
 Update this registration entry whenever the plugin binary changes. Automating
@@ -250,6 +257,9 @@ docker plugin set swarm-external-secrets:latest \
   SECRETS_PROVIDER=aws \
   AWS_REGION=us-east-1 \
   AWS_AUTH_METHOD=spiffe \
+  AWS_ACCESS_KEY_ID="" \
+  AWS_SECRET_ACCESS_KEY="" \
+  AWS_PROFILE="" \
   AWS_ROLE_ARN=arn:aws:iam::123456789012:role/swarm-external-secrets \
   AWS_JWT_AUDIENCE=123456789012 \
   SPIFFE_ENDPOINT_SOCKET=unix:///run/host/api.sock
@@ -257,8 +267,12 @@ docker plugin set swarm-external-secrets:latest \
 docker plugin enable swarm-external-secrets:latest
 ```
 
-Do not set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE` in
-SPIFFE mode. The plugin rejects mixed authentication modes.
+Keep `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_PROFILE` empty in
+SPIFFE mode. The example clears settings left by earlier static or profile
+authentication. The plugin rejects mixed authentication modes.
+
+`SPIFFE_ENDPOINT_SOCKET` must use `unix:///absolute/path` form without a host,
+user information, query values, or a fragment. Invalid URLs fail initialization.
 
 ### Settings
 
@@ -271,8 +285,14 @@ SPIFFE mode. The plugin rejects mixed authentication modes.
 | `AWS_REGION` | No | `us-east-1` |
 | `AWS_STS_ENDPOINT_URL` | No | AWS STS |
 | `AWS_ENDPOINT_URL` | No | AWS Secrets Manager |
+| `AWS_KMS_ENDPOINT` | No | `AWS_ENDPOINT_URL`, then AWS KMS |
 
 The endpoint overrides are intended for tests and compatible AWS emulators.
+
+Secrets Manager and KMS use the same SPIFFE credentials cache. For secrets
+containing application-encrypted KMS ciphertext, set the `kms_decrypt=true`
+secret label; `kms_ciphertext_encoding` defaults to `base64`. The assumed role
+must have `kms:Decrypt` permission for the key.
 
 ## Availability and credential refresh
 
@@ -281,25 +301,49 @@ temporarily unavailable. The first AWS request returns an error if the Workload
 API cannot be reached, and a later request retries. Each credential refresh,
 including JWT retrieval and the STS exchange, has a 30-second timeout.
 
+The AWS credentials cache detaches a shared refresh from the requesting call's
+cancellation and deadline. The refresh uses its own timeout, so canceling a
+Secrets Manager or KMS request does not leave an unbounded STS refresh running.
+
 JWT-SVIDs are fetched only for STS exchanges. The AWS SDK caches the resulting
 temporary credentials and refreshes them on the next request after expiration,
 so the secret rotation loop does not call SPIRE or STS on every check.
 
 ## Verification
 
-The local test runs a SPIRE Server, node-level SPIRE Agent, Kumo's STS and
-Secrets Manager emulators, the managed plugin, and a Swarm service:
+Run these tests on a disposable Linux Docker Swarm node. Both modes rebuild
+and replace `swarm-external-secrets:latest` and remove the plugin during cleanup.
+Install Bash, AWS CLI v2, `jq`, `curl`, and `realpath`. Initialize Docker Swarm
+with `docker swarm init` if the test node is not already part of a swarm.
+
+### Local Kumo mode
+
+The local test starts a SPIRE Server, node-level SPIRE Agent, Kumo's STS,
+Secrets Manager, and KMS emulators, the managed plugin, and a Swarm service.
+It verifies secret retrieval, KMS decryption, and rotation, then removes its
+SPIRE containers, network, and socket directory during cleanup:
 
 ```bash
-makim scripts.smoke-test-awssm-spiffe
+AWS_SPIFFE_SMOKE_MODE=local bash scripts/tests/smoke-test-awssm-spiffe.sh
 ```
+
+With Makim installed, the equivalent command is
+`AWS_SPIFFE_SMOKE_MODE=local makim scripts.smoke-test-awssm-spiffe`.
 
 Kumo validates the AWS SDK request flow but does not prove JWT signature
 validation or the real IAM trust policy.
 
+### Real AWS mode
+
+This mode uses your existing SPIRE Server, Agent, OIDC discovery provider, IAM
+role, and AWS secret. It does not start or remove SPIRE infrastructure. It
+disables rotation and checks that AWS authentication succeeds and a nonempty
+secret is mounted; it does not exercise the local KMS decryption/rotation flow.
+
 After provisioning the real issuer, role, SPIRE Agent, and test secret, run:
 
 ```bash
+AWS_SPIFFE_SMOKE_MODE=aws \
 AWS_REGION=us-east-1 \
 AWS_ROLE_ARN=arn:aws:iam::123456789012:role/swarm-external-secrets \
 AWS_SECRET_ID=production/smoke-test \
@@ -310,11 +354,15 @@ AWS_JWT_AUDIENCE=123456789012 \
 makim scripts.smoke-test-awssm-spiffe
 ```
 
-The single entry point selects Kumo when no real-AWS identity variables are
-set. If any real-AWS identity variable is present, it validates the complete
-configuration before running. Set `AWS_SPIFFE_SMOKE_MODE=local` or
-`AWS_SPIFFE_SMOKE_MODE=aws` to override automatic detection. Neither mode
-prints the mounted secret.
+The single entry point defaults to `AWS_SPIFFE_SMOKE_MODE=auto`: it selects real
+AWS mode if any of `AWS_ROLE_ARN`, `AWS_SECRET_ID`, `AWS_OIDC_ISSUER_URL`, or
+`SPIFFE_SOCKET_SOURCE` is set, and otherwise selects local mode. Real AWS mode
+validates the complete required configuration before running. Set
+`AWS_SPIFFE_SMOKE_MODE=local` or `AWS_SPIFFE_SMOKE_MODE=aws` to choose explicitly.
+
+Real AWS mode checks the mounted file without printing its contents. The local
+test service writes its disposable test secret values to container logs so the
+test can verify retrieval and rotation.
 
 ## Security limitations
 

@@ -194,11 +194,12 @@ docker plugin set swarm-external-secrets:latest \
 docker plugin set swarm-external-secrets:latest \
     SECRETS_PROVIDER="aws" \
     AWS_REGION="us-west-2" \
-    AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+    AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE" \
+    AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ```
 
 For secretless AWS authentication with a node-level SPIRE Agent, see the
-[SPIFFE/OIDC guide](https://github.com/sugar-org/swarm-external-secrets/blob/main/docs/aws-spiffe.md).
+[SPIFFE/OIDC guide](https://github.com/sciops-org/swarm-external-secrets/blob/main/docs/aws-spiffe.md).
 
 ### Azure Key Vault
 ```bash

@@ -98,6 +98,7 @@ docker plugin set swarm-external-secrets:latest \
 | `AWS_JWT_AUDIENCE` | JWT-SVID audience | `swarm-external-secrets` |
 | `SPIFFE_ENDPOINT_SOCKET` | SPIRE Workload API socket URL inside the plugin | `unix:///run/host/spire/agent-sockets/api.sock` |
 | `AWS_ENDPOINT_URL` | Secrets Manager endpoint override, also used for KMS when `AWS_KMS_ENDPOINT` is unset (for emulators such as Kumo or floci) | — |
+| `AWS_KMS_ENDPOINT` | KMS endpoint override for `kms_decrypt=true` secrets | `AWS_ENDPOINT_URL`, then AWS KMS |
 | `AWS_STS_ENDPOINT_URL` | STS endpoint override for testing | — |
 
 **Example:**
@@ -111,12 +112,18 @@ docker plugin set swarm-external-secrets:latest \
 
 **SPIFFE/OIDC Example:**
 
+Provision SPIRE separately and configure the plugin while it is disabled.
+Clear any static credentials or profile left by a previous configuration:
+
 ```bash
 docker plugin set swarm-external-secrets:latest \
     spire-agent-socket.source=/run/spire/agent-sockets \
     SECRETS_PROVIDER="aws" \
     AWS_REGION="us-west-2" \
     AWS_AUTH_METHOD="spiffe" \
+    AWS_ACCESS_KEY_ID="" \
+    AWS_SECRET_ACCESS_KEY="" \
+    AWS_PROFILE="" \
     AWS_ROLE_ARN="arn:aws:iam::123456789012:role/swarm-external-secrets" \
     AWS_JWT_AUDIENCE="123456789012" \
     SPIFFE_ENDPOINT_SOCKET="unix:///run/host/api.sock"
