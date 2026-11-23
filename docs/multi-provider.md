@@ -25,6 +25,12 @@ The Vault Swarm Plugin supports multiple secrets providers, allowing you to use 
 | `VAULT_JWT_FILE` | Path inside the plugin to a JWT file | — |
 | `VAULT_JWT_AUTH_PATH` | JWT auth mount path | `jwt` |
 | `VAULT_SKIP_VERIFY` | Skip TLS verification (not recommended for production) | `false` |
+| `USE_WEBHOOK` | Use the Vault HTTP notification listener when rotation is enabled | `false` |
+| `WEBHOOK_PORT` | Webhook HTTP listener port | `9095` |
+| `WEBHOOK_SECRET` | Shared HMAC token; empty disables webhook authentication | — |
+
+For setup, the implemented request format, and the HCP signature compatibility
+limitation, see [Vault webhook synchronization](webhooks.md).
 
 **Example:**
 ```bash

@@ -8,12 +8,29 @@ BLU='\033[0;34m'
 DEF='\033[0m'
 
 PLUGIN_NAME="swarm-external-secrets:latest"
+WEBHOOK_PORT="${WEBHOOK_PORT:-9095}"
+WEBHOOK_PATH="${WEBHOOK_PATH:-/webhook}"
+WEBHOOK_SECRET="${WEBHOOK_SECRET:-smoke-webhook-secret}"
 
 # Logging
 info()    { echo -e "${BLU}[INFO]${DEF} $*"; }
 success() { echo -e "${GRN}[PASS]${DEF} $*"; }
 error()   { echo -e "${RED}[FAIL]${DEF} $*" >&2; }
 die()     { error "$*"; exit 1; }
+
+wait_for_webhook_health() {
+    local elapsed=0
+    while [[ "${elapsed}" -lt 60 ]]; do
+        if curl --fail --silent --show-error --max-time 2 \
+            "http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH}/health" >/dev/null; then
+            success "Plugin webhook health endpoint is ready."
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    die "Timed out waiting for plugin webhook health endpoint"
+}
 
 docker_daemon_logs() {
     # Best-effort: plugin logs are routed through Docker daemon logs.

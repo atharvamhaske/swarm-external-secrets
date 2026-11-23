@@ -24,6 +24,11 @@ For more information, check out [GSoC Contribution Guidelines](./CONTRIBUTING.md
 
 Please refer to the [docs](https://sciops-org.github.io/swarm-external-secrets/) for more information. JWT login and Vault/OpenBao client-token renewal are in `docs/jwt.md`.
 
+The [Vault webhook guide](https://sciops-org.github.io/swarm-external-secrets/webhooks/)
+covers listener setup, signed requests, retries, and CI smoke-test coverage.
+Webhook mode requires a separate event sender; the current SHA-256 validator
+has a known compatibility gap with HCP's SHA-512 signatures.
+
 ## Supported Providers
 
 ## Features

@@ -21,7 +21,7 @@ func main() {
 	flag.Parse()
 
 	if *flVersion {
-		log.Println("Vault Secrets Provider v1.0.0")
+		log.Println("Swarm External Secrets v1.0.0")
 		return
 	}
 	logCloser := logging.ConfigureLogger(*flDebug)
@@ -33,12 +33,12 @@ func main() {
 		}(logCloser)
 	}
 
-	log.Print("Starting Vault Secrets Provider...")
+	log.Print("Starting Swarm External Secrets...")
 
-	// Initialize the Vault driver
+	// Initialize the configured secrets provider.
 	driver, err := NewDriver()
 	if err != nil {
-		log.Fatalf("Failed to initialize vault driver: %v", err)
+		log.Fatalf("Failed to initialize secrets driver: %v", err)
 	}
 
 	// Set up signal handling for graceful shutdown
@@ -59,7 +59,7 @@ func main() {
 	handler := secrets.NewHandler(driver)
 
 	// Serve the plugin - must match config.json socket name
-	log.Println("Starting Vault secrets provider plugin...")
+	log.Infof("Starting secrets provider plugin with %s provider...", driver.provider.GetProviderName())
 	if err := handler.ServeUnix("plugin", 0); err != nil {
 		log.Fatalf("Failed to serve plugin: %v", err)
 	}

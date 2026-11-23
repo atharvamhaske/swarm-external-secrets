@@ -6,6 +6,11 @@ This document describes the automatic secret rotation feature of the Swarm Exter
 
 The plugin automatically monitors secrets in Vault and updates the corresponding Docker Swarm secrets and services when changes are detected. This ensures that applications always use the latest secret values without manual intervention.
 
+Polling is the default. Vault also supports an opt-in HTTP notification listener
+with `USE_WEBHOOK=true`; a healthy listener replaces periodic polling. See
+[Vault webhook synchronization](webhooks.md) for configuration, sender
+requirements, retry behavior, and the current HCP compatibility limitation.
+
 This is **secret value** rotation. Keeping the plugin logged in to Vault or OpenBao
 (AppRole/JWT client-token renew-self and re-login) is documented separately in
 [Vault and OpenBao JWT](jwt.md). A static `VAULT_TOKEN` or `OPENBAO_TOKEN` is
@@ -15,7 +20,7 @@ not renewed.
 
 1. **Secret Tracking**: When a Docker service requests a secret, the plugin tracks the mapping between the Docker secret and its corresponding Vault path.
 
-2. **Background Monitoring**: A background goroutine periodically checks Vault for changes to tracked secrets by comparing SHA256 hashes of secret values.
+2. **Change Detection**: In polling mode, a background goroutine periodically checks Vault for changes by comparing SHA256 hashes of secret values. In Vault webhook mode, accepted events trigger the check. A listener startup failure falls back to polling.
 
 3. **Automatic Rotation**: When a change is detected:
    - A new version of the Docker secret is created with the updated value
@@ -30,6 +35,7 @@ The following environment variables control the rotation behavior:
 |---|---|---|
 | `ENABLE_ROTATION` | Enable/disable automatic rotation | `true` |
 | `ROTATION_INTERVAL` | How often to check for changes | `10s` |
+| `USE_WEBHOOK` | Use the Vault notification listener instead of periodic polling | `false` |
 | `LOG_LEVEL` | Optional log level integer `0-6` (use `6` for trace) | `4` (info) |
 
 For Vault and OpenBao, rotation tracking uses the same configured mount path as normal secret reads:
@@ -84,7 +90,7 @@ docker plugin set swarm-external-secrets:latest \
 
 Then a secret such as `kv/data/database/mysql` is tracked and rotated against the configured `kv` mount instead of the default `secret` mount.
 
-3. **Automatic rotation**: Within the next rotation interval (default 5 minutes), the plugin will:
+3. **Automatic rotation**: In polling mode, within the next rotation interval (default 10 seconds), the plugin will:
    - Detect the change in Vault
    - Update the Docker secret with the new value
    - Force update services using the secret
@@ -143,7 +149,8 @@ services:
 ## Limitations
 
 - Services must support graceful secret updates (restart when secrets change)
-- Rotation frequency is limited by the configured interval
+- Polling frequency is limited by the configured interval
+- Webhook mode requires a separate sender and retries for failed or busy requests; missed events have no periodic polling recovery while the listener is healthy
 - Docker Swarm must be running in manager mode for secret management
 
 ## Troubleshooting
