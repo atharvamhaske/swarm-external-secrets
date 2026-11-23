@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types/swarm"
+
+	"github.com/sciops-org/swarm-external-secrets/providers"
 )
 
 func TestBuildUpdatedSecretReferences(t *testing.T) {
@@ -115,4 +120,112 @@ func assertSecretReference(t *testing.T, gotRef, wantRef *swarm.SecretReference)
 	if gotRef.SecretName != wantRef.SecretName {
 		t.Fatalf("SecretName = %q, want %q", gotRef.SecretName, wantRef.SecretName)
 	}
+}
+
+func TestStopCancelsRotationBeforeClosingProvider(t *testing.T) {
+	for _, phase := range []string{"reconciliation", "secret lookup"} {
+		t.Run(phase, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			started := make(chan struct{})
+			finished := make(chan struct{})
+			release := make(chan struct{})
+			defer close(release)
+			closed := make(chan bool, 1)
+			var calls atomic.Int32
+			block := func(ctx context.Context) error {
+				calls.Add(1)
+				close(started)
+				defer close(finished)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-release:
+					return context.Canceled
+				}
+			}
+			provider := &rotationLifecycleProvider{
+				prepare: func(ctx context.Context) error {
+					if phase == "reconciliation" {
+						return block(ctx)
+					}
+					return nil
+				},
+				get: func(ctx context.Context) ([]byte, error) {
+					if phase == "reconciliation" {
+						return nil, context.Canceled
+					}
+					return nil, block(ctx)
+				},
+				close: func() error {
+					select {
+					case <-finished:
+						closed <- true
+					default:
+						closed <- false
+					}
+					return nil
+				},
+			}
+			driver := &SecretsDriver{
+				provider:      provider,
+				monitorCtx:    ctx,
+				monitorCancel: cancel,
+				secretTracker: map[string]*providers.SecretInfo{
+					"test": {DockerSecretName: "test"},
+				},
+			}
+			cycleDone := make(chan struct{})
+			go func() {
+				driver.checkForSecretChanges()
+				close(cycleDone)
+			}()
+			select {
+			case <-started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("rotation did not start")
+			}
+			stopDone := make(chan error, 1)
+			go func() { stopDone <- driver.Stop() }()
+			select {
+			case err := <-stopDone:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("Stop did not cancel active rotation")
+			}
+			if !<-closed {
+				t.Fatal("provider closed before rotation finished")
+			}
+			select {
+			case <-cycleDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("rotation did not finish")
+			}
+			driver.checkForSecretChanges()
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("rotation ran after Stop: calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
+type rotationLifecycleProvider struct {
+	providers.SecretsProvider
+	prepare func(context.Context) error
+	get     func(context.Context) ([]byte, error)
+	close   func() error
+}
+
+func (p *rotationLifecycleProvider) PrepareReconciliation(ctx context.Context, _ []*providers.SecretInfo) error {
+	return p.prepare(ctx)
+}
+
+func (p *rotationLifecycleProvider) GetSecret(ctx context.Context, _ *providers.SecretInfo) ([]byte, error) {
+	return p.get(ctx)
+}
+
+func (p *rotationLifecycleProvider) Close() error {
+	return p.close()
 }

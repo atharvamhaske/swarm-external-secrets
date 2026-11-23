@@ -142,6 +142,9 @@ func NewDriver() (*SecretsDriver, error) {
 	// Start the webhook listener for event-driven rotation (e.g. Doppler).
 	if config.WebhookEnable {
 		if err := driver.startWebhookServer(); err != nil {
+			if cleanupErr := driver.Stop(); cleanupErr != nil {
+				log.Warnf("Error cleaning up failed driver initialization: %v", cleanupErr)
+			}
 			return nil, err
 		}
 	}
@@ -180,6 +183,9 @@ func (d *SecretsDriver) startWebhookServer() error {
 // handleWebhookEvent drops any cached provider secrets and runs a rotation
 // check. Invoked asynchronously by the webhook server after authentication.
 func (d *SecretsDriver) handleWebhookEvent(_ dopplerwebhook.Payload) {
+	if d.monitorCtx.Err() != nil {
+		return
+	}
 	if !d.config.EnableRotation || !d.provider.SupportsRotation() {
 		log.Debug("Webhook received but rotation is disabled or unsupported; ignoring")
 		return
@@ -361,6 +367,9 @@ func (d *SecretsDriver) startMonitoring() {
 func (d *SecretsDriver) checkForSecretChanges() {
 	d.rotationMu.Lock()
 	defer d.rotationMu.Unlock()
+	if d.monitorCtx.Err() != nil {
+		return
+	}
 
 	d.trackerMutex.RLock()
 	secrets := make(map[string]*providers.SecretInfo, len(d.secretTracker))
@@ -373,6 +382,9 @@ func (d *SecretsDriver) checkForSecretChanges() {
 	}
 
 	d.prepareReconciliation(secrets)
+	if d.monitorCtx.Err() != nil {
+		return
+	}
 
 	log.Debugf("Checking %d tracked secrets for changes", len(secrets))
 	// TODO: Revisit this limit if secret-label fanout or provider latency changes.
@@ -410,7 +422,7 @@ func (d *SecretsDriver) prepareReconciliation(secrets map[string]*providers.Secr
 	}
 
 	if preparer, ok := d.provider.(providers.ReconciliationPreparer); ok {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(d.monitorCtx, 30*time.Second)
 		defer cancel()
 		if err := preparer.PrepareReconciliation(ctx, infos); err != nil {
 			log.Errorf("Failed to refresh secrets before rotation check: %v", err)
@@ -439,7 +451,7 @@ func (d *SecretsDriver) handleSecretRotationResult(secretName string, secretInfo
 // hasSecretChanged fetches the current secret value and compares its hash
 // against the stored hash to detect changes.
 func (d *SecretsDriver) hasSecretChanged(secretInfo *providers.SecretInfo) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(d.monitorCtx, 30*time.Second)
 	defer cancel()
 
 	currentValue, err := d.provider.GetSecret(ctx, secretInfo)
@@ -461,7 +473,7 @@ func (d *SecretsDriver) rotateSecret(secretInfo *providers.SecretInfo) error {
 	log.Infof("Starting rotation for secret: %s", secretInfo.DockerSecretName)
 
 	// Get the new secret value from the provider using the existing SecretInfo
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(d.monitorCtx, 30*time.Second)
 	defer cancel()
 
 	providerValue, err := d.provider.GetSecret(ctx, secretInfo)
@@ -491,7 +503,7 @@ func (d *SecretsDriver) rotateSecret(secretInfo *providers.SecretInfo) error {
 
 // updateDockerSecret creates a new version of the Docker secret
 func (d *SecretsDriver) updateDockerSecret(secretName string, newValue []byte) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(d.monitorCtx, 30*time.Second)
 	defer cancel()
 
 	// List existing secrets to find the one to update
@@ -552,7 +564,7 @@ func (d *SecretsDriver) updateDockerSecret(secretName string, newValue []byte) e
 
 // updateServicesSecretReference updates all services to use the new secret version
 func (d *SecretsDriver) updateServicesSecretReference(oldSecretName, oldSecretID, newSecretName, newSecretID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(d.monitorCtx, 60*time.Second)
 	defer cancel()
 
 	// List all services
@@ -680,6 +692,12 @@ func (d *SecretsDriver) Stop() error {
 			log.Warnf("Error stopping webhook server: %v", err)
 		}
 	}
+
+	// Rotation calls use monitorCtx, so cancellation lets active work finish
+	// before the provider and Docker client are closed. Queued cycles see the
+	// canceled context and return without accessing these resources.
+	d.rotationMu.Lock()
+	defer d.rotationMu.Unlock()
 
 	if d.provider != nil {
 		if err := d.provider.Close(); err != nil {

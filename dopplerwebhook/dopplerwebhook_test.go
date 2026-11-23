@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -259,10 +260,8 @@ func TestServer_HandleStatusAndDispatch(t *testing.T) {
 	}
 }
 
-// TestServer_HandleOversizedBodyTruncated verifies that a body larger than
-// maxBodyBytes is truncated by the LimitReader, which causes signature
-// verification over the full body to fail rather than reading unbounded input.
-func TestServer_HandleOversizedBodyTruncated(t *testing.T) {
+// Oversized requests must be rejected before signature verification or dispatch.
+func TestServer_HandleRejectsOversizedBody(t *testing.T) {
 	const secret = "whsec"
 
 	// Build a valid JSON payload padded past the read cap.
@@ -272,16 +271,15 @@ func TestServer_HandleOversizedBodyTruncated(t *testing.T) {
 	called := false
 	onEvent := func(_ Payload) { called = true }
 
-	// Signature is computed over the full body; the server only reads the first
-	// maxBodyBytes, so verification must fail.
+	// Even a correctly signed request must respect the body-size limit.
 	resp := postWebhook(t, secret, onEvent, http.MethodPost, body, sign(secret, body))
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusRequestEntityTooLarge)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 	if called {
-		t.Fatal("onEvent should not be called when the body is truncated")
+		t.Fatal("onEvent should not be called when the body is oversized")
 	}
 }
 
@@ -308,4 +306,138 @@ func postWebhook(t *testing.T, secret string, onEvent func(Payload), method, bod
 	}
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp
+}
+
+func TestNewRejectsRoutePatterns(t *testing.T) {
+	for _, path := range []string{"/{", "/foo}", "/{secret}", "/webhooks doppler", "/webhooks\tdoppler"} {
+		t.Run(path, func(t *testing.T) {
+			if _, err := New(":0", path, "whsec", false, nil); err == nil {
+				t.Fatalf("New(%q) error = nil, want invalid literal path", path)
+			}
+		})
+	}
+}
+
+func TestServerCoalescesBurst(t *testing.T) {
+	started := make(chan Payload, 2)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	var calls atomic.Int32
+	s, err := New(":0", defaultPath, "", true, func(payload Payload) {
+		started <- payload
+		if calls.Add(1) == 1 {
+			<-release
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		releaseOnce.Do(func() { close(release) })
+		if err := s.Stop(); err != nil {
+			t.Error(err)
+		}
+	}()
+	if !s.dispatch(Payload{Type: "first"}) {
+		t.Fatal("first event was not accepted")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first callback did not start")
+	}
+	for range 100 {
+		if !s.dispatch(Payload{Type: "intermediate"}) {
+			t.Fatal("event was not accepted")
+		}
+	}
+	if !s.dispatch(Payload{Type: "latest"}) {
+		t.Fatal("last event was not accepted")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("callbacks running during blocked first callback = %d, want 1", got)
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case payload := <-started:
+		if payload.Type != "latest" {
+			t.Fatalf("pending payload = %q, want latest", payload.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pending callback did not start")
+	}
+	if err := s.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("callback count = %d, want 2", got)
+	}
+}
+
+func TestServerStopJoinsCallbackAndDiscardsPending(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	var calls atomic.Int32
+	s, err := New(":0", defaultPath, "", true, func(Payload) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.dispatch(Payload{}) {
+		t.Fatal("event was not accepted")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("callback did not start")
+	}
+	if !s.dispatch(Payload{}) {
+		t.Fatal("pending event was not accepted")
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.Stop() }()
+	deadline := time.After(time.Second)
+	for {
+		s.eventMu.Lock()
+		stopping := s.stopped
+		s.eventMu.Unlock()
+		if stopping {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("Stop did not begin")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	select {
+	case err := <-stopped:
+		t.Fatalf("Stop returned before the active callback completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, defaultPath, strings.NewReader(`{"type":"config.secrets.update"}`))
+	s.handle(w, r)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("dispatch after Stop status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not join callback")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("callback count after Stop = %d, want 1", got)
+	}
 }

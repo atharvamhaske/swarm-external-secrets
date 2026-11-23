@@ -10,11 +10,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -54,6 +56,11 @@ type Server struct {
 	secret        string
 	allowUnsigned bool
 	onEvent       func(Payload)
+	eventMu       sync.Mutex
+	eventRunning  bool
+	eventDone     chan struct{}
+	pendingEvent  *Payload
+	stopped       bool
 }
 
 // New builds a Doppler webhook listener. onEvent is invoked asynchronously
@@ -65,6 +72,9 @@ func New(addr, path, secret string, allowUnsigned bool, onEvent func(Payload)) (
 	}
 	if !strings.HasPrefix(path, "/") {
 		return nil, fmt.Errorf("webhook path must start with /")
+	}
+	if strings.ContainsAny(path, "{} \t\r\n") {
+		return nil, fmt.Errorf("webhook path must be a literal path without wildcards or whitespace")
 	}
 	secret = strings.TrimSpace(secret)
 	if secret == "" && !allowUnsigned {
@@ -110,7 +120,23 @@ func (s *Server) Start() error {
 func (s *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return s.server.Shutdown(ctx)
+
+	s.eventMu.Lock()
+	s.stopped = true
+	s.pendingEvent = nil
+	done := s.eventDone
+	s.eventMu.Unlock()
+
+	shutdownErr := s.server.Shutdown(ctx)
+	if done == nil {
+		return shutdownErr
+	}
+	select {
+	case <-done:
+		return shutdownErr
+	case <-ctx.Done():
+		return errors.Join(shutdownErr, fmt.Errorf("wait for webhook callback: %w", ctx.Err()))
+	}
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
@@ -119,8 +145,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyBytes))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
+		var sizeErr *http.MaxBytesError
+		if errors.As(err, &sizeErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
@@ -147,12 +178,49 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	log.Infof("Received Doppler webhook (added=%d removed=%d updated=%d); triggering rotation check",
 		len(payload.Diff.Added), len(payload.Diff.Removed), len(payload.Diff.Updated))
 
-	// Respond immediately: Doppler delivery is best-effort and time-limited, so
-	// the rotation check runs asynchronously.
+	if !s.dispatch(payload) {
+		http.Error(w, "webhook listener is stopping", http.StatusServiceUnavailable)
+		return
+	}
+	// Respond immediately while one worker handles the latest pending event.
 	w.WriteHeader(http.StatusOK)
+}
 
-	if s.onEvent != nil {
-		go s.onEvent(payload)
+// dispatch bounds callback work to one running event and one pending event.
+// A reconciliation reads current provider state, so intermediate deliveries
+// can be coalesced without creating a queue of redundant rotation checks.
+func (s *Server) dispatch(payload Payload) bool {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if s.stopped {
+		return false
+	}
+	if s.onEvent == nil {
+		return true
+	}
+	if s.eventRunning {
+		s.pendingEvent = &payload
+		return true
+	}
+	s.eventRunning = true
+	s.eventDone = make(chan struct{})
+	go s.runEvents(payload)
+	return true
+}
+
+func (s *Server) runEvents(payload Payload) {
+	for {
+		s.onEvent(payload)
+		s.eventMu.Lock()
+		if s.stopped || s.pendingEvent == nil {
+			s.eventRunning = false
+			close(s.eventDone)
+			s.eventMu.Unlock()
+			return
+		}
+		payload = *s.pendingEvent
+		s.pendingEvent = nil
+		s.eventMu.Unlock()
 	}
 }
 
