@@ -88,7 +88,10 @@ docker plugin set "${PLUGIN_NAME}" \
     VAULT_TOKEN="${VAULT_TOKEN}" \
     VAULT_MOUNT_PATH="secret" \
     ENABLE_ROTATION="true" \
-    ROTATION_INTERVAL="10s" \
+    ROTATION_INTERVAL="1h" \
+    USE_WEBHOOK="true" \
+    WEBHOOK_PORT="${WEBHOOK_PORT}" \
+    WEBHOOK_SECRET="${WEBHOOK_SECRET}" \
     VAULT_SKIP_VERIFY="false" \
     ENABLE_MONITORING="false"
 success "Plugin configured with Vault token."
@@ -96,6 +99,7 @@ success "Plugin configured with Vault token."
 # Run (enable) the plugin
 info "Enabling plugin..."
 enable_plugin
+wait_for_webhook_health
 
 # Run docker stack deploy
 info "Deploying swarm stack..."
@@ -125,11 +129,15 @@ docker exec "${VAULT_CONTAINER}" \
     "${SECRET_FIELD}=${SECRET_VALUE_ROTATED}"
 success "Secret rotated to: ${SECRET_VALUE_ROTATED}"
 
-info "Waiting for plugin rotation interval (15s)..."
-sleep 15
-
-info "Waiting for new container to start after rotation (10s)..."
-sleep 10
+info "Sending signed Vault webhook event..."
+WEBHOOK_PAYLOAD='{"event_action":"rotate","event_source":"hashicorp.secrets.secret","event_payload":{"name":"mysql"}}'
+WEBHOOK_SIGNATURE=$(printf '%s' "${WEBHOOK_PAYLOAD}" | openssl dgst -sha256 -hmac "${WEBHOOK_SECRET}" -hex)
+WEBHOOK_SIGNATURE="${WEBHOOK_SIGNATURE##* }"
+curl --fail --silent --show-error --max-time 140 \
+    -H "Content-Type: application/json" \
+    -H "X-HCP-Webhook-Signature: ${WEBHOOK_SIGNATURE}" \
+    --data-binary "${WEBHOOK_PAYLOAD}" \
+    "http://127.0.0.1:${WEBHOOK_PORT}${WEBHOOK_PATH}"
 assert_no_sensitive_rotation_metadata_logs
 
 info "Logging service output after rotation..."

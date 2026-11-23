@@ -340,3 +340,19 @@ func TestVaultProvider_BuildSecretPathThroughConfig(t *testing.T) {
 		vaultcompat.NormalizeVaultKVVersion,
 		vaultProviderFromConfig)
 }
+
+func TestVaultProvider_GetSecret_Base64Decode(t *testing.T) {
+	runSharedBase64DecodeCases(t, func(serverURL string) SecretsProvider {
+		provider := &VaultProvider{}
+		if err := provider.Initialize(map[string]string{
+			"VAULT_ADDR":  serverURL,
+			"VAULT_TOKEN": "test-token",
+		}); err != nil {
+			t.Fatalf("Initialize() error = %v", err)
+		}
+		if got := provider.GetProviderName(); got != "vault" {
+			t.Fatalf("GetProviderName() = %q, want vault", got)
+		}
+		return provider
+	})
+}

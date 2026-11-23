@@ -24,6 +24,11 @@ For more information, check out [GSoC Contribution Guidelines](./CONTRIBUTING.md
 
 Please refer to the [docs](https://sciops-org.github.io/swarm-external-secrets/) for more information. JWT login and Vault/OpenBao client-token renewal are in `docs/jwt.md`.
 
+The [Vault webhook guide](https://sciops-org.github.io/swarm-external-secrets/webhooks/)
+covers listener setup, signed requests, retries, and CI smoke-test coverage.
+Webhook mode requires a separate event sender; the current SHA-256 validator
+has a known compatibility gap with HCP's SHA-512 signatures.
+
 ## Supported Providers
 
 ## Features
@@ -31,6 +36,7 @@ Please refer to the [docs](https://sciops-org.github.io/swarm-external-secrets/)
 - **Multi-Provider Support**: HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, OpenBao, OCI Vault, Infisical, Doppler
 - **Multiple Auth Methods**: Support for various authentication methods per provider
 - **Automatic Secret Rotation**: Monitor providers for changes and automatically update Docker secrets and services
+- **Base64 Secret Decoding (HashiCorp Vault & OpenBao)**: Decode base64-encoded secrets (e.g. binary JKS/PKCS12 keystores) before delivery via `base64_decode: "true"` for HashiCorp Vault and OpenBao
 - **Real-time Monitoring**: Web dashboard with system metrics, health status, and performance tracking
 - **Flexible Path Mapping**: Customize secret paths and field extraction per provider
 - **Production Ready**: Includes proper error handling, logging, cleanup, and monitoring
@@ -150,6 +156,31 @@ docker plugin set swarm-external-secrets:latest \
          oci_field: "password"
    ```
 
+   **Decoding Base64 Secrets with HashiCorp Vault / OpenBao (e.g., Binary Files / Keystores):**
+
+   *HashiCorp Vault:*
+   ```yaml
+   secrets:
+     kafka_client_keystore:
+       driver: swarm-external-secrets:latest
+       labels:
+         vault_path: "secrets"
+         vault_field: "KAFKA_CLIENT_KEYSTORE"
+         base64_decode: "true"
+   ```
+
+   *OpenBao:*
+   ```yaml
+   secrets:
+     kafka_client_keystore:
+       driver: swarm-external-secrets:latest
+       labels:
+         openbao_path: "secrets"
+         openbao_field: "KAFKA_CLIENT_KEYSTORE"
+         base64_decode: "true"
+   ```
+
+
 4. Optional: enable plugin log sidecar (for `docker compose logs` visibility):
 
    On Linux, the default plugin log path is `/run/swarm-external-secrets/plugin.log`.
@@ -175,7 +206,7 @@ docker plugin set swarm-external-secrets:latest \
 | Provider | Status | Authentication | Rotation |
 |----------|--------|---------------|----------|
 | HashiCorp Vault | ✅ Stable | Token, AppRole, JWT | ✅ |
-| AWS Secrets Manager | ✅ Stable | IAM, Access Keys | ✅ |
+| AWS Secrets Manager | ✅ Stable | IAM, Access Keys, SPIFFE/OIDC | ✅ |
 | Azure Key Vault | ✅ Stable | Service Principal, Access Token | ✅ |
 | OpenBao | ✅ Stable | Token, AppRole, JWT | ✅ |
 | OCI Vault | 🚧 Beta | API Key, Instance Principal | ✅ |
@@ -198,8 +229,12 @@ docker plugin set swarm-external-secrets:latest \
 docker plugin set swarm-external-secrets:latest \
     SECRETS_PROVIDER="aws" \
     AWS_REGION="us-west-2" \
-    AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+    AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE" \
+    AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 ```
+
+For secretless AWS authentication with a node-level SPIRE Agent, see the
+[SPIFFE/OIDC guide](https://github.com/sciops-org/swarm-external-secrets/blob/main/docs/aws-spiffe.md).
 
 ### Azure Key Vault
 ```bash
