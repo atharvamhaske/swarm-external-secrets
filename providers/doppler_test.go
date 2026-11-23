@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/docker/go-plugins-helpers/secrets"
@@ -722,6 +724,120 @@ func TestDopplerProviderRetriesCanceledLeader(t *testing.T) {
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("API calls = %d, want two", got)
 	}
+}
+
+func TestDopplerProviderSharesHTTPTimeout(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		provider := &DopplerProvider{}
+		if err := provider.Initialize(map[string]string{"DOPPLER_TOKEN": "dp.st.test"}); err != nil {
+			t.Fatal(err)
+		}
+		var calls atomic.Int32
+		release := make(chan struct{})
+		provider.httpClient.Transport = dopplerRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			calls.Add(1)
+			<-release
+			return nil, context.DeadlineExceeded
+		})
+		const count = 5
+		results := make(chan error, count)
+		for range count {
+			go func() {
+				_, err := provider.getSecretValue(context.Background(), "project", "dev", "SHARED")
+				results <- err
+			}()
+		}
+		// All callers have joined the blocked download before it times out.
+		synctest.Wait()
+		close(release)
+		synctest.Wait()
+		for range count {
+			if err := <-results; !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("GetSecret() error = %v, want HTTP timeout", err)
+			}
+		}
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("API calls = %d, want one shared HTTP timeout", got)
+		}
+	})
+}
+
+func TestDopplerProviderResponseSizeLimit(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name  string
+		extra string
+	}{
+		{name: "exact limit"},
+		{name: "oversized response", extra: "x"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider := &DopplerProvider{}
+			if err := provider.Initialize(map[string]string{"DOPPLER_TOKEN": "dp.st.test"}); err != nil {
+				t.Fatal(err)
+			}
+			const prefix = `{"LIMIT": "value"}`
+			var calls atomic.Int32
+			provider.httpClient.Transport = dopplerRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls.Add(1)
+				body := io.MultiReader(
+					strings.NewReader(prefix),
+					strings.NewReader(strings.Repeat(" ", maxDopplerResponseBytes-len(prefix))),
+					strings.NewReader(tt.extra),
+				)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(body)}, nil
+			})
+			value, err := provider.getSecretValue(context.Background(), "project", "dev", "LIMIT")
+			if tt.extra == "" {
+				if err != nil || value != "value" {
+					t.Fatalf("GetSecret() = %q, %v; want value", value, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "response exceeds") {
+				t.Fatalf("GetSecret() error = %v, want oversized-response error", err)
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("API calls = %d, want 1", got)
+			}
+		})
+	}
+}
+
+func TestDopplerProviderRejectsRedirects(t *testing.T) {
+	t.Parallel()
+	var redirectedCalls atomic.Int32
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectedCalls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]string{"REDIRECT": "value"})
+	}))
+	t.Cleanup(destination.Close)
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, destination.URL+r.URL.RequestURI(), http.StatusFound)
+	}))
+	t.Cleanup(origin.Close)
+	provider := &DopplerProvider{}
+	if err := provider.Initialize(map[string]string{
+		"DOPPLER_TOKEN":   "dp.st.test",
+		"DOPPLER_API_URL": origin.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	provider.httpClient.Transport = origin.Client().Transport
+	_, err := provider.getSecretValue(context.Background(), "project", "dev", "REDIRECT")
+	var apiErr *DopplerAPIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusFound {
+		t.Errorf("GetSecret() error = %v, want redirect status error", err)
+	}
+	if got := redirectedCalls.Load(); got != 0 {
+		t.Errorf("redirected requests = %d, want 0", got)
+	}
+}
+
+type dopplerRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f dopplerRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func setupDopplerHandler(t *testing.T, handler http.HandlerFunc) *DopplerProvider {

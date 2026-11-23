@@ -91,9 +91,10 @@ type dopplerFetchKey struct {
 }
 
 type dopplerFetch struct {
-	done  chan struct{}
-	value string
-	err   error
+	done           chan struct{}
+	value          string
+	err            error
+	callerCanceled bool
 }
 
 type dopplerCacheEntry struct {
@@ -135,7 +136,14 @@ func (d *DopplerProvider) Initialize(config map[string]string) error {
 		APIBaseURL: apiBaseURL,
 		CacheTTL:   cacheTTL,
 	}
-	d.httpClient = &http.Client{Timeout: 30 * time.Second}
+	d.httpClient = &http.Client{
+		Timeout: 30 * time.Second,
+		// Only the configured origin may receive the bearer token. In
+		// particular, redirects must not bypass the HTTPS requirement.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	d.cache = make(map[dopplerCacheKey]dopplerCacheEntry)
 	d.inflight = make(map[dopplerFetchKey]*dopplerFetch)
 
@@ -385,7 +393,7 @@ func (d *DopplerProvider) getSecretValue(ctx context.Context, project, configNam
 				return "", ctx.Err()
 			case <-pending.done:
 				// A canceled leader must not cancel other callers' lookups.
-				if errors.Is(pending.err, context.Canceled) || errors.Is(pending.err, context.DeadlineExceeded) {
+				if pending.callerCanceled {
 					continue
 				}
 				return pending.value, pending.err
@@ -398,6 +406,7 @@ func (d *DopplerProvider) getSecretValue(ctx context.Context, project, configNam
 		value, err := d.fetchSecretValue(ctx, key, fetchKey.generation)
 		d.fetchMu.Lock()
 		pending.value, pending.err = value, err
+		pending.callerCanceled = err != nil && ctx.Err() != nil
 		delete(d.inflight, fetchKey)
 		close(pending.done)
 		d.fetchMu.Unlock()
@@ -557,10 +566,13 @@ func (d *DopplerProvider) downloadSecretsOnce(ctx context.Context, endpoint stri
 		return nil, nil, true, fmt.Errorf("failed to call Doppler API: %w", err)
 	}
 
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxDopplerResponseBytes))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxDopplerResponseBytes+1))
 	_ = resp.Body.Close()
 	if readErr != nil {
 		return nil, nil, true, fmt.Errorf("failed to read Doppler response: %w", readErr)
+	}
+	if len(body) > maxDopplerResponseBytes {
+		return nil, nil, false, fmt.Errorf("doppler response exceeds %d bytes", maxDopplerResponseBytes)
 	}
 
 	if resp.StatusCode == http.StatusOK {
