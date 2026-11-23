@@ -225,6 +225,32 @@ docker plugin set swarm-external-secrets:latest \
     OCI_VAULT_OCID="ocid1.vault.oc1..example"
 ```
 
+### Doppler
+
+Configure an installed, disabled plugin with a service token scoped to your Doppler project and config:
+
+```bash
+docker plugin set swarm-external-secrets:latest \
+    SECRETS_PROVIDER="doppler" \
+    DOPPLER_TOKEN="dp.st.example" \
+    ENABLE_ROTATION="true" \
+    ROTATION_INTERVAL="30s"
+```
+
+Reference a Doppler key in your stack's secrets:
+
+```yaml
+secrets:
+  api_key:
+    driver: swarm-external-secrets:latest
+    labels:
+      doppler_secret_name: "API_KEY"
+```
+
+See the [Doppler guide](https://sciops-org.github.io/swarm-external-secrets/doppler/)
+for a complete stack example, CLI-token settings, signed webhooks, and smoke tests
+that run without a Doppler account.
+
 ### License
 
 [BSD-3-Clause license](https://github.com/sciops-org/swarm-external-secrets/blob/main/LICENSE)

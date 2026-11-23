@@ -287,20 +287,22 @@ The plugin resolves which secret to fetch using the following logic:
 
 **Provider Type:** `doppler`
 
+See the [Doppler guide](doppler.md) for setup, a complete stack example, and mock or live smoke tests.
+
 **Environment Variables:**
 
 | Variable | Description | Default |
 |---|---|---|
 | `DOPPLER_TOKEN` | Doppler service token or CLI token (required) | — |
 | `DOPPLER_PROJECT` | Doppler project (required for non-service tokens) | — |
-| `DOPPLER_CONFIG` | Doppler config/environment (`dev`, `stg`, `prd`) | — |
-| `DOPPLER_API_URL` | API origin. HTTP is allowed only for loopback hosts. The client always uses the v3 API. | `https://api.doppler.com` |
-| `DOPPLER_CACHE_TTL` | Cache duration for secret downloads | `30s` |
+| `DOPPLER_CONFIG` | Doppler config/environment (`dev`, `stg`, `prd`); required for non-service tokens | — |
+| `DOPPLER_API_URL` | API origin, without an API path or query. HTTPS is required except for loopback hosts; redirects are rejected. The client adds the v3 API path. | `https://api.doppler.com` |
+| `DOPPLER_CACHE_TTL` | Cache duration for secret downloads; `0s` disables reuse of cached values | `30s` |
 | `DOPPLER_WEBHOOK_SECRET` | Signing secret used to verify `X-Doppler-Signature`. Required when the listener is enabled unless `DOPPLER_WEBHOOK_INSECURE=true`. | — |
 | `DOPPLER_WEBHOOK_INSECURE` | Accept unsigned webhooks. Local development only. | `false` |
 | `DOPPLER_WEBHOOK_ENABLE` | Enable the webhook listener for event-driven rotation | `false` |
 | `DOPPLER_WEBHOOK_PORT` | Port for the webhook listener (host network) | `8081` |
-| `DOPPLER_WEBHOOK_PATH` | HTTP path for the webhook listener | `/webhooks/doppler` |
+| `DOPPLER_WEBHOOK_PATH` | Literal HTTP path beginning with `/`, without wildcards or whitespace | `/webhooks/doppler` |
 
 **Authentication:**
 
@@ -348,8 +350,9 @@ docker plugin set swarm-external-secrets:latest \
 ```
 
 - On a `config.secrets.update` delivery, the plugin verifies the `X-Doppler-Signature` HMAC-SHA256 header against `DOPPLER_WEBHOOK_SECRET`, drops its Doppler cache, and runs a rotation check right away.
-- The plugin runs with host networking, so the endpoint is reachable at `http://<host>:<DOPPLER_WEBHOOK_PORT><DOPPLER_WEBHOOK_PATH>`. Point the Doppler webhook (and any signing secret) at that URL.
+- The plugin serves HTTP on the host network at `http://<host>:<DOPPLER_WEBHOOK_PORT><DOPPLER_WEBHOOK_PATH>`. Use a reverse proxy to terminate HTTPS when exposing this listener outside the host.
 - `DOPPLER_WEBHOOK_SECRET` is required while the listener is enabled unless `DOPPLER_WEBHOOK_INSECURE=true`, which accepts unsigned requests and is only for local development.
+- The listener starts only when rotation is enabled and the provider supports it. Deliveries are processed asynchronously; bursts share one pending reconciliation rather than starting one rotation for every delivery.
 - Webhook delivery is best-effort; the poll-based `ROTATION_INTERVAL` remains the safety net. Each rotation cycle drops the cache once, then downloads the tracked secret names for that project and config in one request.
 
 ---
@@ -651,11 +654,13 @@ secrets:
 
 ## Secret Reuse Control
 
-The `secret_reuse` label controls whether Docker Swarm should cache and reuse a secret value or fetch it fresh from the provider on every request.
+The `secret_reuse` label controls whether Docker Swarm may reuse the plugin's response or must call the plugin again.
 
-**Default behaviour:** secrets are always fetched fresh from the provider.
+**Default behaviour:** reuse is allowed unless the Docker secret name contains `cert`, `token`, or `dynamic`.
 
-**With `secret_reuse: "true"`:** Docker Swarm caches the secret value and reuses it without calling the provider again.
+**With `secret_reuse: "true"`:** reuse is allowed, including for names covered by the default exceptions.
+
+**With `secret_reuse: "false"`:** Swarm is told to call the plugin again. Provider caches still apply; for example, a normal Doppler read can use `DOPPLER_CACHE_TTL`. Rotation checks refresh the Doppler cache independently of this label.
 
 ### Usage
 ```yaml
@@ -665,5 +670,5 @@ secrets:
     labels:
       vault_path: "database/mysql"
       vault_field: "password"
-      secret_reuse: "true"   # reuse cached value, do not fetch again
+      secret_reuse: "true"   # allow Swarm to reuse the plugin response
 ```

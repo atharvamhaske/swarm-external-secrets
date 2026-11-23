@@ -90,7 +90,7 @@
     },
     {
       "name": "SECRETS_PROVIDER",
-      "description": "Secrets provider type (e.g., vault, aws, azure, openbao, oci)",
+      "description": "Secrets provider type (e.g., vault, aws, azure, openbao, oci, infisical, doppler)",
       "settable": ["value"]
     },
     {
@@ -350,12 +350,12 @@
     },
     {
       "name": "DOPPLER_CONFIG",
-      "description": "Doppler config/environment (dev, stg, prd)",
+      "description": "Doppler config/environment (dev, stg, prd); required for non-service tokens",
       "settable": ["value"]
     },
     {
       "name": "DOPPLER_API_URL",
-      "description": "Doppler API origin (default https://api.doppler.com). HTTP is allowed only for loopback hosts.",
+      "description": "Doppler API origin without a path or query (default https://api.doppler.com). HTTP is allowed only for loopback hosts; redirects are rejected.",
       "settable": ["value"]
     },
     {
@@ -365,7 +365,7 @@
     },
     {
       "name": "DOPPLER_WEBHOOK_SECRET",
-      "description": "Doppler webhook signing secret used to verify X-Doppler-Signature. Required when DOPPLER_WEBHOOK_ENABLE=true.",
+      "description": "Doppler webhook signing secret used to verify X-Doppler-Signature. Required when DOPPLER_WEBHOOK_ENABLE=true unless DOPPLER_WEBHOOK_INSECURE=true.",
       "settable": ["value"]
     },
     {
@@ -385,7 +385,7 @@
     },
     {
       "name": "DOPPLER_WEBHOOK_PATH",
-      "description": "HTTP path for the Doppler webhook listener, default /webhooks/doppler",
+      "description": "Literal HTTP path beginning with / for the Doppler webhook listener (no wildcards or whitespace), default /webhooks/doppler",
       "settable": ["value"]
     },
     {
