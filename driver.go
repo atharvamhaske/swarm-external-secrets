@@ -270,8 +270,10 @@ func (d *SecretsDriver) shouldNotReuse(req secrets.Request) bool {
 	return false
 }
 
-// ReconcileSecret is used by the webhook path to reconcile tracked secrets
-// without waiting for the ticker interval.
+// ReconcileSecret checks every tracked Docker name or Vault path suffix matching
+// secretName. Untracked or unchanged secrets require no rotation. It returns
+// joined provider/rotation errors, including cancellation, so the webhook can
+// request a retry. Successful rotations remain applied if another match fails.
 func (d *SecretsDriver) ReconcileSecret(ctx context.Context, secretName string) error {
 	d.trackerMutex.RLock()
 	var matches []*providers.SecretInfo

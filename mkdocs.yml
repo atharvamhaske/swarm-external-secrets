@@ -70,6 +70,7 @@ nav:
   - Multi-Provider: multi-provider.md
   - Monitoring: monitoring.md
   - Rotation: rotation.md
+  - Vault Webhooks: webhooks.md
   - Debugging: debugging.md
   - Contributing Guidelines: CONTRIBUTING.md
 copyright: "Copyright &copy; 2025, Swarm External Secrets contributors"

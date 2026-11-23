@@ -17,10 +17,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ReconcileFunc is the callback signature that the driver exposes so that both
-// the existing ticker and the new webhook path can share the same
-// fetch-and-update logic.
-// The function receives the Docker secret name that needs to be reconciled.
+// ReconcileFunc checks tracked secrets matching an event's secret name.
+// The listener calls it synchronously and acknowledges success only when it
+// returns nil. Implementations must honor ctx cancellation and deadlines.
 type ReconcileFunc func(ctx context.Context, secretName string) error
 
 const (
@@ -28,11 +27,10 @@ const (
 	webhookReconcileTimeout = 2 * time.Minute
 )
 
-// HCP Vault Secrets webhook payload types -----
-
-// WebhookPayload represents the top-level structure of an HCP Vault Secrets
-// webhook event.  Only the fields the plugin cares about are kept; unknown
-// fields are silently ignored by encoding/json.
+// WebhookPayload is the HCP-style JSON envelope accepted by the listener.
+// EventAction, EventSource, and EventPayload.Name control reconciliation;
+// other metadata does not select a Vault namespace or application. Unknown
+// JSON fields are ignored. This envelope alone does not establish HCP compatibility.
 type WebhookPayload struct {
 	EventID          string              `json:"event_id"`
 	EventAction      string              `json:"event_action"`
@@ -44,8 +42,8 @@ type WebhookPayload struct {
 	EventPayload     WebhookEventPayload `json:"event_payload"`
 }
 
-// WebhookEventPayload holds the inner payload shipped inside every HCP webhook
-// event.  The "name" field carries the human-readable secret name.
+// WebhookEventPayload holds the event's secret name and optional metadata.
+// Name is matched against tracked Docker names and Vault path suffixes.
 type WebhookEventPayload struct {
 	AppName        string `json:"app_name"`
 	Name           string `json:"name"`
@@ -58,17 +56,20 @@ type WebhookEventPayload struct {
 	Version        int    `json:"version"`
 }
 
-// WebhookConfig holds the user-supplied configuration for the webhook listener.
+// WebhookConfig configures the HTTP listener. The driver supplies defaults;
+// NewWebhookServer uses the supplied values without applying defaults.
 type WebhookConfig struct {
-	// Port on which the HTTP listener binds (default 9095).
+	// Port is the TCP listener port on all interfaces; the driver defaults to 9095.
 	Port int
-	// Secret is the HMAC token shared with HCP.  When non-empty every
-	// incoming request MUST carry a valid X-HCP-Webhook-Signature header.
+	// WebhookSecret is the shared token for the current HMAC-SHA256 validator.
+	// A nonempty token requires X-HCP-Webhook-Signature on POST /webhook, including
+	// verification pings. Empty disables authentication and Start logs a warning.
 	WebhookSecret string
 }
 
-// WebhookServer is an HTTP server that receives push events from HCP Vault
-// Secrets and triggers secret reconciliation through the shared ReconcileFunc.
+// WebhookServer receives HCP-style notifications and reconciles one request at
+// a time. It provides no Vault-side event subscription. The current SHA-256
+// signature validator is incompatible with HCP's documented SHA-512 signatures.
 type WebhookServer struct {
 	config    *WebhookConfig
 	reconcile ReconcileFunc
@@ -90,7 +91,9 @@ var actionable = map[string]bool{
 	"rotate": true,
 }
 
-// NewWebhookServer creates a ready-to-start webhook server.
+// NewWebhookServer prepares /webhook and /webhook/health without binding a port.
+// cfg and reconcile must be non-nil; callers must not mutate cfg during use.
+// Call Start to listen and Stop to cancel and drain in-flight reconciliation.
 func NewWebhookServer(cfg *WebhookConfig, reconcile ReconcileFunc) *WebhookServer {
 	mux := http.NewServeMux()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -116,7 +119,9 @@ func NewWebhookServer(cfg *WebhookConfig, reconcile ReconcileFunc) *WebhookServe
 	return ws
 }
 
-// Start begins listening.  This method blocks; call it in a goroutine.
+// Start listens until Stop is called or the HTTP server fails. It returns
+// listener/server errors and treats normal shutdown as success. Call it in a
+// goroutine when the caller must continue serving the Docker plugin socket.
 func (ws *WebhookServer) Start() error {
 	if ws.config.WebhookSecret == "" {
 		log.Warn("Webhook secret is unset; webhook requests are unauthenticated")
@@ -129,7 +134,9 @@ func (ws *WebhookServer) Start() error {
 	return nil
 }
 
-// Stop gracefully shuts the server down.
+// Stop cancels in-flight reconciliation and drains HTTP requests and callbacks
+// for up to five seconds. It returns an error if shutdown or draining times out.
+// A stopped server cannot be restarted.
 func (ws *WebhookServer) Stop() error {
 	ws.workMu.Lock()
 	ws.stopping = true
@@ -289,8 +296,8 @@ func (ws *WebhookServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 // Helpers
 
 // verifyHMAC checks the X-HCP-Webhook-Signature header against the raw body.
-// HCP uses HMAC-SHA256 with the shared token to compute the hex-encoded
-// signature.
+// This implementation uses HMAC-SHA256; HCP documents HMAC-SHA512, so direct
+// HCP signatures are not compatible with the current validator.
 func (ws *WebhookServer) verifyHMAC(body []byte, signature string) bool {
 	mac := hmac.New(sha256.New, []byte(ws.config.WebhookSecret))
 	mac.Write(body)
@@ -303,10 +310,7 @@ func (ws *WebhookServer) verifyHMAC(body []byte, signature string) bool {
 // isSecretEvent returns true when the event_source indicates a secret
 // lifecycle event as opposed to app or integration events.
 //
-// HCP Vault Secrets uses these event_source values:
-//   - "hashicorp.secrets.secret"      → secret lifecycle (we care about this)
-//   - "hashicorp.secrets.app"         → application lifecycle (ignore)
-//   - "hashicorp.secrets.integration" → integration lifecycle (ignore)
+// The listener accepts "hashicorp.secrets.secret" and ignores other sources.
 func isSecretEvent(source string) bool {
 	return strings.EqualFold(source, "hashicorp.secrets.secret")
 }
