@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat/jwtsource"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat/jwtsource"
 )
 
 type Config struct {

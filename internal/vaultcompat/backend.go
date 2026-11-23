@@ -12,9 +12,9 @@ import (
 	openbaoapi "github.com/openbao/openbao/api/v2"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat/login"
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat/vclient"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat/login"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat/vclient"
 )
 
 const (

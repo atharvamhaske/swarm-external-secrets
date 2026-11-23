@@ -3,7 +3,7 @@ package secrettransform
 import (
 	"context"
 
-	"github.com/sugar-org/swarm-external-secrets/providers"
+	"github.com/sciops-org/swarm-external-secrets/providers"
 )
 
 // Transformer can modify a provider value before Docker receives it.

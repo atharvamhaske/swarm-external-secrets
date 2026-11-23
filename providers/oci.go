@@ -13,7 +13,7 @@ import (
 	ocisecrets "github.com/oracle/oci-go-sdk/v65/secrets"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
 )
 
 // OCIProvider implements the SecretsProvider interface for Oracle Cloud Infrastructure Vault

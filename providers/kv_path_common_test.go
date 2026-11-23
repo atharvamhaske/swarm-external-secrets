@@ -6,7 +6,7 @@ import (
 
 	"github.com/docker/go-plugins-helpers/secrets"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat"
 )
 
 // secretPathBuilder is the slice of the provider behaviour these shared tests

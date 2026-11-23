@@ -1,5 +1,5 @@
 ### Swarm External Secrets
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sugar-org/swarm-external-secrets/badge)](https://scorecard.dev/viewer/?uri=github.com/sugar-org/swarm-external-secrets) ![Discord](https://img.shields.io/discord/1476983394977054740?logo=discord&color=blue) [![Join our Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/4NYdBu7bZy) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sugar-org/swarm-external-secrets)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sciops-org/swarm-external-secrets/badge)](https://scorecard.dev/viewer/?uri=github.com/sciops-org/swarm-external-secrets) ![Discord](https://img.shields.io/discord/1476983394977054740?logo=discord&color=blue) [![Join our Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.gg/4NYdBu7bZy) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sciops-org/swarm-external-secrets)
 
 ---
 
@@ -17,12 +17,12 @@ For more information, check out [GSoC Contribution Guidelines](./CONTRIBUTING.md
 
 ### Architecture 
 
-![Architecture](https://raw.githubusercontent.com/sugar-org/swarm-external-secrets/refs/heads/main/docs/architecture.png)
+![Architecture](https://raw.githubusercontent.com/sciops-org/swarm-external-secrets/refs/heads/main/docs/architecture.png)
 
 
 ## Documentation
 
-Please refer to the [docs](https://sugar-org.github.io/swarm-external-secrets/) for more information. JWT login and Vault/OpenBao client-token renewal are in `docs/jwt.md`.
+Please refer to the [docs](https://sciops-org.github.io/swarm-external-secrets/) for more information. JWT login and Vault/OpenBao client-token renewal are in `docs/jwt.md`.
 
 ## Supported Providers
 
@@ -226,8 +226,8 @@ docker plugin set swarm-external-secrets:latest \
 
 ### License
 
-[BSD-3-Clause license](https://github.com/sugar-org/swarm-external-secrets/blob/main/LICENSE)
+[BSD-3-Clause license](https://github.com/sciops-org/swarm-external-secrets/blob/main/LICENSE)
 
 ## Explore the Repository
 
-If you want to explore the repository or read more, check out [Ask DeepWiki](https://deepwiki.com/sugar-org/swarm-external-secrets).
+If you want to explore the repository or read more, check out [Ask DeepWiki](https://deepwiki.com/sciops-org/swarm-external-secrets).

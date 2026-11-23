@@ -14,8 +14,8 @@ import (
 	"github.com/docker/go-plugins-helpers/secrets"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/spiffesource"
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/spiffesource"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
 )
 
 const (
@@ -41,12 +41,21 @@ type webIdentityRoleAssumer interface {
 }
 
 type spiffeCredentialsProvider struct {
-	client      webIdentityRoleAssumer
-	tokenSource identityTokenFetcher
-	roleARN     string
+	client         webIdentityRoleAssumer
+	tokenSource    identityTokenFetcher
+	roleARN        string
+	refreshTimeout time.Duration
 }
 
 func (p *spiffeCredentialsProvider) Retrieve(ctx context.Context) (aws.Credentials, error) {
+	// CredentialsCache removes caller cancellation, so bound the entire refresh here.
+	timeout := p.refreshTimeout
+	if timeout == 0 {
+		timeout = awsConfigLoadTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	token, err := p.tokenSource.FetchIdentityToken(ctx)
 	if err != nil {
 		return aws.Credentials{}, fmt.Errorf("failed to retrieve JWT-SVID: %w", err)

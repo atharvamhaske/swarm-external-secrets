@@ -17,10 +17,10 @@ import (
 	"github.com/docker/go-plugins-helpers/secrets"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/secrettransform"
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
-	"github.com/sugar-org/swarm-external-secrets/monitoring"
-	"github.com/sugar-org/swarm-external-secrets/providers"
+	"github.com/sciops-org/swarm-external-secrets/internal/secrettransform"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/monitoring"
+	"github.com/sciops-org/swarm-external-secrets/providers"
 )
 
 // SecretsDriver implements the secrets.Driver interface with multi-provider support

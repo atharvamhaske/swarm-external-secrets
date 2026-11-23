@@ -1,4 +1,4 @@
-module github.com/sugar-org/swarm-external-secrets
+module github.com/sciops-org/swarm-external-secrets
 
 go 1.25.0
 
