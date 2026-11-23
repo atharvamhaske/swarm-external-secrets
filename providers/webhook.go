@@ -23,6 +23,11 @@ import (
 // The function receives the Docker secret name that needs to be reconciled.
 type ReconcileFunc func(ctx context.Context, secretName string) error
 
+const (
+	maxWebhookBodyBytes     = 1 << 20
+	webhookReconcileTimeout = 2 * time.Minute
+)
+
 // HCP Vault Secrets webhook payload types -----
 
 // WebhookPayload represents the top-level structure of an HCP Vault Secrets
@@ -101,7 +106,7 @@ func NewWebhookServer(cfg *WebhookConfig, reconcile ReconcileFunc) *WebhookServe
 			Handler:           mux,
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       10 * time.Second,
-			WriteTimeout:      10 * time.Second,
+			WriteTimeout:      webhookReconcileTimeout + 15*time.Second,
 		},
 	}
 
@@ -168,7 +173,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1024*1024))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes))
 	if err != nil {
 		var sizeError *http.MaxBytesError
 		if errors.As(err, &sizeError) {
@@ -233,7 +238,8 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Trigger reconciliation asynchronously
+	// Admit one reconciliation at a time so duplicate events cannot rotate
+	// the same Docker secret concurrently.
 	ws.workMu.Lock()
 	if ws.stopping {
 		ws.workMu.Unlock()
@@ -250,18 +256,27 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.work.Add(1)
 	ws.workMu.Unlock()
-	go func() {
-		defer ws.work.Done()
-		defer func() { <-ws.active }()
-		log.Printf("webhook: reconciling secret %q (action=%s)", secretName, payload.EventAction)
-		if err := ws.reconcile(ws.ctx, secretName); err != nil {
-			log.Errorf("webhook: reconciliation failed for %q: %v", secretName, err)
-		} else {
-			log.Printf("webhook: successfully reconciled secret %q", secretName)
-		}
-	}()
+	defer ws.work.Done()
+	defer func() { <-ws.active }()
 
-	// Return 200 immediately so HCP does not retry.
+	ctx, cancel := context.WithTimeout(r.Context(), webhookReconcileTimeout)
+	defer cancel()
+	stopCancel := context.AfterFunc(ws.ctx, cancel)
+	defer stopCancel()
+
+	log.Printf("webhook: reconciling secret %q (action=%s)", secretName, payload.EventAction)
+	err = ws.reconcile(ctx, secretName)
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		log.Errorf("webhook: reconciliation failed for %q: %v", secretName, err)
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "reconciliation failed", http.StatusServiceUnavailable)
+		return
+	}
+
+	log.Printf("webhook: successfully reconciled secret %q", secretName)
 	w.WriteHeader(http.StatusOK)
 }
 

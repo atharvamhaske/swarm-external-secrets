@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -28,10 +29,11 @@ func TestWebhookServer_StopCancelsReconciliation(t *testing.T) {
 
 	body := `{"event_action":"rotate","event_source":"hashicorp.secrets.secret","event_payload":{"name":"mysql"}}`
 	recorder := httptest.NewRecorder()
-	ws.server.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body)))
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
+	requestDone := make(chan struct{})
+	go func() {
+		defer close(requestDone)
+		ws.server.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body)))
+	}()
 	select {
 	case <-started:
 	case <-time.After(5 * time.Second):
@@ -44,6 +46,10 @@ func TestWebhookServer_StopCancelsReconciliation(t *testing.T) {
 	case <-finished:
 	default:
 		t.Fatal("Stop returned before reconciliation finished")
+	}
+	<-requestDone
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status on cancellation = %d, want 503", recorder.Code)
 	}
 	recorder = httptest.NewRecorder()
 	ws.server.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body)))
@@ -177,5 +183,54 @@ func TestWebhookServer_RejectsOverlappingReconciliation(t *testing.T) {
 	<-firstDone
 	if first.Code != http.StatusOK {
 		t.Fatalf("first request status = %d, want 200", first.Code)
+	}
+}
+
+func TestWebhookServer_ReturnsReconciliationFailure(t *testing.T) {
+	t.Parallel()
+	ws := NewWebhookServer(&WebhookConfig{}, func(ctx context.Context, name string) error {
+		return errors.New("provider unavailable")
+	})
+	t.Cleanup(func() { _ = ws.Stop() })
+	body := `{"event_action":"rotate","event_source":"hashicorp.secrets.secret","event_payload":{"name":"mysql"}}`
+	recorder := httptest.NewRecorder()
+	ws.server.Handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body)))
+	if recorder.Code != http.StatusServiceUnavailable || recorder.Header().Get("Retry-After") == "" {
+		t.Fatalf("failed reconciliation response = %d, headers = %v; want retryable 503", recorder.Code, recorder.Header())
+	}
+}
+
+func TestWebhookServer_CancelsWithRequest(t *testing.T) {
+	t.Parallel()
+	started := make(chan struct{})
+	ws := NewWebhookServer(&WebhookConfig{}, func(ctx context.Context, name string) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	t.Cleanup(func() { _ = ws.Stop() })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	body := `{"event_action":"rotate","event_source":"hashicorp.secrets.secret","event_payload":{"name":"mysql"}}`
+	req := httptest.NewRequest(http.MethodPost, "/webhook", strings.NewReader(body)).WithContext(ctx)
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ws.server.Handler.ServeHTTP(recorder, req)
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconciliation did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status after client cancellation = %d, want 503", recorder.Code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconciliation ignored request cancellation")
 	}
 }

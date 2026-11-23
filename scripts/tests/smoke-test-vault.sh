@@ -133,7 +133,7 @@ info "Sending signed Vault webhook event..."
 WEBHOOK_PAYLOAD='{"event_action":"rotate","event_source":"hashicorp.secrets.secret","event_payload":{"name":"mysql"}}'
 WEBHOOK_SIGNATURE=$(printf '%s' "${WEBHOOK_PAYLOAD}" | openssl dgst -sha256 -hmac "${WEBHOOK_SECRET}" -hex)
 WEBHOOK_SIGNATURE="${WEBHOOK_SIGNATURE##* }"
-curl --fail --silent --show-error --max-time 10 \
+curl --fail --silent --show-error --max-time 140 \
     -H "Content-Type: application/json" \
     -H "X-HCP-Webhook-Signature: ${WEBHOOK_SIGNATURE}" \
     --data-binary "${WEBHOOK_PAYLOAD}" \
