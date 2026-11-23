@@ -8,8 +8,8 @@ import (
 	"github.com/docker/go-plugins-helpers/secrets"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/kvpath"
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat"
+	"github.com/sciops-org/swarm-external-secrets/internal/kvpath"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat"
 )
 
 // VaultProvider implements the SecretsProvider interface for HashiCorp Vault.

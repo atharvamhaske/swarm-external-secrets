@@ -1,6 +1,6 @@
 package providers
 
-import "github.com/sugar-org/swarm-external-secrets/internal/utils"
+import "github.com/sciops-org/swarm-external-secrets/internal/utils"
 
 func ExtractSecretValueFromMap(data map[string]interface{}, field string) ([]byte, error) {
 	return utils.ExtractSecretValueFromMap(data, field)

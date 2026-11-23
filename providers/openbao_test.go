@@ -3,7 +3,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat"
 )
 
 const openBaoPathLabel = "openbao_path"

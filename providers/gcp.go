@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
 )
 
 // GCPProvider implements the SecretsProvider interface for GCP Secret Manager

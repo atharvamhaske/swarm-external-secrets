@@ -6,7 +6,7 @@ import (
 
 	"github.com/docker/go-plugins-helpers/secrets"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
 )
 
 // SecretInfo tracks information about secrets being managed

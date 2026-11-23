@@ -72,7 +72,7 @@ cd swarm-external-secrets
 3. Add the upstream remote:
 
 ```bash
-git remote add upstream https://github.com/sugar-org/swarm-external-secrets.git
+git remote add upstream https://github.com/sciops-org/swarm-external-secrets.git
 ```
 
 ### Set Up the Development Environment
@@ -258,7 +258,7 @@ To add support for a new secret backend:
 
 ## Documentation
 
-Documentation source files live in the [docs directory](https://github.com/sugar-org/swarm-external-secrets/tree/main/docs) and are built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/).
+Documentation source files live in the [docs directory](https://github.com/sciops-org/swarm-external-secrets/tree/main/docs) and are built with [MkDocs Material](https://squidfunk.github.io/mkdocs-material/).
 
 To preview the docs locally, activate the conda environment first, then serve the docs:
 ```bash
@@ -277,7 +277,7 @@ When contributing documentation:
 
 **swarm-external-secrets** is participating in [Google Summer of Code 2026](https://summerofcode.withgoogle.com/) under [OpenScienceLabs](http://opensciencelabs.org/).
 
-If you are a student looking to apply, please review the [Project Ideas Wiki](https://github.com/sugar-org/swarm-external-secrets/wiki/Project-Ideas) and start contributing early. Please focus on small implementations or bugfixes and only change the necessary code,"less is more." PRs that are too long or contain unnecessary changes are impossible to review and will be closed.
+If you are a student looking to apply, please review the [Project Ideas Wiki](https://github.com/sciops-org/swarm-external-secrets/wiki/Project-Ideas) and start contributing early. Please focus on small implementations or bugfixes and only change the necessary code,"less is more." PRs that are too long or contain unnecessary changes are impossible to review and will be closed.
 
 Feel free to ping us if you need help or use the `#gsoc` channel on [discord](https://discord.gg/GaYjnbtqQ).
 

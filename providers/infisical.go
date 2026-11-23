@@ -20,7 +20,7 @@ import (
 	infisicalauth "github.com/infisical/go-sdk/packages/api/auth"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
 )
 
 const (

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sugar-org/swarm-external-secrets/internal/utils"
-	"github.com/sugar-org/swarm-external-secrets/internal/vaultcompat/vclient"
+	"github.com/sciops-org/swarm-external-secrets/internal/utils"
+	"github.com/sciops-org/swarm-external-secrets/internal/vaultcompat/vclient"
 )
 
 type fakeClientResult struct {
